@@ -22,6 +22,7 @@
  *   PATCH  /api/links/<ws>/<slug>     UpdateLinkRequest-> UpdateLinkResponse   (Bearer key)
  *   DELETE /api/links/<ws>/<slug>                      -> DeleteLinkResponse   (Bearer key or admin token)
  *   GET    /api/ns/<ws>/links                          -> ListLinksResponse    (Bearer key)
+ *   POST   /api/ns/<ws>/sweep                          -> SweepLinksResponse   (Bearer key)
  *
  * Public routes (not JSON API)
  *   GET /<ws>/<slug>        200 HTML with OG tags and an immediate redirect to Notion
@@ -218,6 +219,19 @@ export interface DeleteLinkResponse {
 export interface ListLinksResponse {
   workspace: string;
   links: LinkView[];
+}
+
+/**
+ * Result of `POST /api/ns/<ws>/sweep` (empty body): removes the links of the namespace whose
+ * target is no longer public under it. Idempotent; the way to finish a post-rotation cleanup
+ * that reported `cleanupComplete: false`.
+ */
+export interface SweepLinksResponse {
+  workspace: string;
+  /** Links removed by this call (not counting earlier sweeps). */
+  removedLinks: number;
+  /** False when this sweep also stopped early (storage trouble); call it again. */
+  cleanupComplete: boolean;
 }
 
 /** Limits that clients may want to pre-validate against. */

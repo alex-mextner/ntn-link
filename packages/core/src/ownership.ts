@@ -11,6 +11,9 @@
  * - A missing nonce on the page does not consume it either (Notion may still be
  *   publishing the edit) and costs no attempt; verify is rate limited per IP instead.
  * - The owner key is random 256 bit, returned once; only its SHA-256 is stored.
+ * - A rotate challenge is bound to the key version it was issued against: once any rotation
+ *   has replaced the key, older challenges fail, and a rotation whose key was overtaken
+ *   while it was still sweeping fails instead of returning a dead key.
  */
 import type { ChallengeAction, ChallengeResponse, VerifyResponse } from './api-types';
 import { randomNonceChars, randomToken, sha256Hex, timingSafeEqual } from './crypto';
@@ -22,6 +25,8 @@ import {
   CHALLENGE_TTL_SECONDS,
   type ChallengeRecord,
   type LinkRecord,
+  type NamespaceRecord,
+  type NamespaceSnapshot,
   type Repository,
 } from './records';
 
@@ -74,6 +79,28 @@ export async function isOwner(
   return timingSafeEqual(await sha256Hex(ownerKey), namespace.keyHash);
 }
 
+/**
+ * The namespace record, confirmed against the primary. A rotate challenge binds to the key
+ * hash seen here, and verify later fails with `challenge_expired` (consuming the challenge) if
+ * that hash is not the current one, so a lagging replica's previous hash must never be
+ * bound. A present record is therefore re-checked with a no-op compare-and-set; if it changed
+ * in between, it is read again.
+ */
+async function readConfirmedNamespace(
+  repo: Repository,
+  workspace: string,
+): Promise<NamespaceRecord | null> {
+  for (let attempt = 0; attempt < CONFIRM_ATTEMPTS; attempt++) {
+    const snapshot = await repo.getNamespaceSnapshot(workspace);
+    if (snapshot === null) return null;
+    if (await repo.namespaceHolds(workspace, snapshot)) return snapshot.record;
+  }
+  throw new ApiError(
+    'upstream_error',
+    'The namespace changed while the challenge was being prepared. Try again.',
+  );
+}
+
 export async function issueChallenge(
   deps: OwnershipDeps,
   page: ParsedNotionUrl,
@@ -81,7 +108,8 @@ export async function issueChallenge(
 ): Promise<ChallengeResponse> {
   const resolved = await requirePublicPage(deps.fetcher, page);
   const workspace = resolved.workspace;
-  const claimed = (await deps.repo.getNamespace(workspace)) !== null;
+  const namespace = (await readConfirmedNamespace(deps.repo, workspace)) ?? null;
+  const claimed = namespace !== null;
   if (action === 'claim' && claimed) {
     throw new ApiError(
       'namespace_claimed',
@@ -105,6 +133,7 @@ export async function issueChallenge(
         workspace,
         action,
         claimTokenHash,
+        namespaceKeyHash: namespace?.keyHash ?? null,
         expiresAt,
       })
     ) {
@@ -139,12 +168,124 @@ export interface SweepResult {
   complete: boolean;
 }
 
+/**
+ * The rotation may or may not have been applied and storage cannot say. Failing closed is the
+ * only answer that never returns a possibly dead key; the challenge is consumed (it is bound
+ * to a key version that may be gone) and a new rotate challenge always recovers, because
+ * whoever controls the page can prove it again.
+ */
+class UnconfirmedRotationError extends ApiError {
+  constructor() {
+    super(
+      'upstream_error',
+      'The storage backend could not confirm the key rotation. Request a new rotate challenge to get a working key.',
+    );
+  }
+}
+
+function overtaken(): ApiError {
+  return new ApiError(
+    'challenge_expired',
+    'Another rotation of this namespace finished first. Request a new challenge if you still need a key.',
+  );
+}
+
+const CONFIRM_ATTEMPTS = 3;
+
+/** Whether the namespace still holds `snapshot`; null when storage never answered. */
+async function stillHolds(
+  repo: Repository,
+  workspace: string,
+  snapshot: NamespaceSnapshot,
+): Promise<boolean | null> {
+  for (let attempt = 0; attempt < CONFIRM_ATTEMPTS; attempt++) {
+    try {
+      return await repo.namespaceHolds(workspace, snapshot);
+    } catch {
+      // Retry: one failed call says nothing about who owns the namespace.
+    }
+  }
+  return null;
+}
+
+/**
+ * The replacement threw: the write may have been applied with only its reply lost, so the
+ * primary is asked what is stored. Returns when `next` is stored; otherwise throws `error`
+ * (nothing changed), `overtaken()` (someone else wrote) or an unconfirmed-rotation error.
+ */
+async function requireReplacementApplied(
+  repo: Repository,
+  workspace: string,
+  existing: NamespaceSnapshot,
+  next: NamespaceSnapshot,
+  error: unknown,
+): Promise<void> {
+  const ours = await stillHolds(repo, workspace, next);
+  if (ours === null) throw new UnconfirmedRotationError();
+  if (ours) return;
+  const untouched = await stillHolds(repo, workspace, existing);
+  if (untouched === null) throw new UnconfirmedRotationError();
+  // Untouched: a plain storage failure. Anything else was written by someone else.
+  throw untouched ? error : overtaken();
+}
+
+/**
+ * Replaces the key of a claimed namespace. The key is replaced first (version-checked); the
+ * sweep that follows is best-effort and re-runnable, so no failure after a deletion can
+ * leave a half-undone rotation. The key is only returned once it is confirmed to still be
+ * the current one: it must never be a key another rotation has already invalidated.
+ */
+async function rotateOwnerKey(
+  deps: OwnershipDeps,
+  workspace: string,
+  challenge: ChallengeRecord,
+  ownerKey: string,
+  keyHash: string,
+): Promise<VerifyResponse> {
+  const existing = await deps.repo.getNamespaceSnapshot(workspace);
+  if (existing === null) {
+    throw new ApiError(
+      'namespace_not_claimed',
+      `The namespace "${workspace}" no longer exists; request a claim challenge.`,
+    );
+  }
+  if (existing.record.keyHash !== challenge.namespaceKeyHash) throw overtaken();
+  const next = deps.repo.snapshotOf({
+    keyHash,
+    claimedAt: existing.record.claimedAt,
+    rotatedAt: deps.now().toISOString(),
+  });
+  let replaced: boolean;
+  try {
+    // Compare-and-set on the exact text read above: a rotation landing in between loses.
+    replaced = await deps.repo.replaceNamespace(workspace, existing, next);
+  } catch (error) {
+    await requireReplacementApplied(deps.repo, workspace, existing, next, error);
+    replaced = true;
+  }
+  if (!replaced) throw overtaken();
+
+  const sweep = await sweepGoneLinks(deps, workspace);
+  // Another rotation may have completed while this one was sweeping.
+  const confirmed = await stillHolds(deps.repo, workspace, next);
+  if (confirmed === null) throw new UnconfirmedRotationError();
+  if (!confirmed) throw overtaken();
+  return {
+    workspace,
+    action: 'rotate',
+    ownerKey,
+    removedLinks: sweep.removedLinks,
+    cleanupComplete: sweep.complete,
+  };
+}
+
 /** Mints the owner key and stores its hash: `claim` sets it atomically, `rotate` replaces it. */
 async function issueOwnerKey(
   deps: OwnershipDeps,
   workspace: string,
-  action: ChallengeAction,
+  challenge: ChallengeRecord,
 ): Promise<VerifyResponse> {
+  const action = challenge.action;
   const ownerKey = `${OWNER_KEY_PREFIX}${randomToken()}`;
   const keyHash = await sha256Hex(ownerKey);
   const nowIso = deps.now().toISOString();
@@ -163,31 +304,7 @@ async function issueOwnerKey(
     return { workspace, action: 'claim', ownerKey, removedLinks: 0, cleanupComplete: true };
   }
 
-  const existing = await deps.repo.getNamespaceSnapshot(workspace);
-  if (existing === null) {
-    throw new ApiError(
-      'namespace_not_claimed',
-      `The namespace "${workspace}" no longer exists; request a claim challenge.`,
-    );
-  }
-  // The key is replaced first (version-checked); the sweep that follows is best-effort and
-  // re-runnable, so no failure after a deletion can leave a half-undone rotation.
-  const next = { keyHash, claimedAt: existing.record.claimedAt, rotatedAt: nowIso };
-  if (!(await deps.repo.replaceNamespace(workspace, existing, next))) {
-    // Never hand out a key that another rotation has just invalidated.
-    throw new ApiError(
-      'challenge_expired',
-      'Another rotation of this namespace finished first. Request a new challenge if you still need a key.',
-    );
-  }
-  const sweep = await sweepGoneLinks(deps, workspace);
-  return {
-    workspace,
-    action: 'rotate',
-    ownerKey,
-    removedLinks: sweep.removedLinks,
-    cleanupComplete: sweep.complete,
-  };
+  return rotateOwnerKey(deps, workspace, challenge, ownerKey, keyHash);
 }
 
 interface LocatedChallenge {
@@ -265,11 +382,13 @@ export async function verifyChallenge(
   }
 
   try {
-    return await issueOwnerKey(deps, workspace, challenge.action);
+    return await issueOwnerKey(deps, workspace, challenge);
   } catch (error) {
-    // A failed rotation must not burn the challenge; losing the race to another rotation must.
+    // A failed rotation must not burn the challenge; losing the race to another rotation must,
+    // and so must an unconfirmed one (see UnconfirmedRotationError).
     const lostRace = error instanceof ApiError && error.code === 'challenge_expired';
-    if (challenge.action === 'rotate' && !lostRace) {
+    const unconfirmed = error instanceof UnconfirmedRotationError;
+    if (challenge.action === 'rotate' && !lostRace && !unconfirmed) {
       await deps.repo.createChallenge(workspace, nonce, challenge);
     }
     throw error;

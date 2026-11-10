@@ -7,7 +7,7 @@ import { ApiError } from './errors';
 import { sha256Hex } from './crypto';
 import type { Store } from './store';
 
-export type RateLimitedAction = 'preview' | 'challenge' | 'verify' | 'links';
+export type RateLimitedAction = 'preview' | 'challenge' | 'verify' | 'links' | 'sweep';
 
 export interface RateLimit {
   limit: number;
@@ -20,6 +20,8 @@ export const RATE_LIMITS: Readonly<Record<RateLimitedAction, RateLimit>> = {
   challenge: { limit: 10, windowSeconds: 600 },
   verify: { limit: 20, windowSeconds: 600 },
   links: { limit: 30, windowSeconds: 60 },
+  /** Fetches Notion once per link of the namespace, so as strict as verify. */
+  sweep: { limit: 10, windowSeconds: 600 },
 };
 
 export async function enforceRateLimit(

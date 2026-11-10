@@ -10,6 +10,7 @@ import type {
   CreateLinkResponse,
   LinkView,
   ListLinksResponse,
+  SweepLinksResponse,
   PreviewRequest,
   PreviewResponse,
   UpdateLinkRequest,
@@ -31,7 +32,6 @@ import {
   sweepGoneLinks,
   verifyChallenge,
   type OwnershipDeps,
-  type SweepResult,
 } from './ownership';
 import { Repository, type LinkRecord } from './records';
 import { checkSlug, slugCandidate, slugify } from './slug';
@@ -82,7 +82,7 @@ export interface Service {
   /** Re-fetches Notion data for a stored link; failures are swallowed by design. */
   refreshLink(workspace: string, slug: string): Promise<void>;
   /** Re-runs the post-rotation cleanup (removes links whose target is gone); owner only. */
-  sweepLinks(workspace: string, ownerKey: string | null): Promise<SweepResult>;
+  sweepLinks(workspace: string, ownerKey: string | null): Promise<SweepLinksResponse>;
   /** What `GET /img/<ws>/<slug>` should serve, resolved fresh (signed URLs expire). */
   cardSource(workspace: string, slug: string): Promise<CardSource | null>;
   /** The stored link for the fast variant; null when missing or no longer public. */
@@ -385,7 +385,8 @@ export function createService(deps: ServiceDeps): Service {
 
     async sweepLinks(workspace, ownerKey) {
       await requireOwnerOf(workspace, ownerKey);
-      return sweepGoneLinks(ownership, workspace);
+      const { removedLinks, complete } = await sweepGoneLinks(ownership, workspace);
+      return { workspace, removedLinks, cleanupComplete: complete };
     },
 
     async refreshLink(workspace, slug) {

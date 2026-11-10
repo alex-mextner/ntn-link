@@ -19,6 +19,13 @@ export const challengeRecordSchema = z.object({
   workspace: z.string(),
   action: z.enum(['claim', 'rotate']),
   claimTokenHash: z.string(),
+  /**
+   * For `rotate`: the keyHash of the namespace version the challenge was issued against, so
+   * a rotation that was overtaken by another one cannot replace (or mint) a newer key.
+   * Null for `claim`, which has no earlier version. Challenges stored before this field
+   * existed read as null: a legacy claim still works, a legacy rotate fails as overtaken.
+   */
+  namespaceKeyHash: z.string().nullable().default(null),
   expiresAt: z.string(),
 });
 export type ChallengeRecord = z.infer<typeof challengeRecordSchema>;
@@ -98,13 +105,25 @@ export class Repository {
   async claimNamespace(ws: string, record: NamespaceRecord): Promise<boolean> {
     return this.store.set(`ns:${ws}`, JSON.stringify(record), { ifAbsent: true });
   }
+  /** The exact text `record` is stored as, so it can be written and later recognised. */
+  snapshotOf(record: NamespaceRecord): NamespaceSnapshot {
+    return { record, raw: JSON.stringify(record) };
+  }
   /** Replaces the namespace only if it is still `previous`; false means another rotation won. */
   async replaceNamespace(
     ws: string,
     previous: NamespaceSnapshot,
-    record: NamespaceRecord,
+    next: NamespaceSnapshot,
   ): Promise<boolean> {
-    return this.store.compareAndSet(`ns:${ws}`, previous.raw, JSON.stringify(record));
+    return this.store.compareAndSet(`ns:${ws}`, previous.raw, next.raw);
+  }
+  /**
+   * True while the namespace still holds exactly `snapshot`. Goes through the store's
+   * compare-and-set (a no-op write that is decided on the primary) rather than a read, because
+   * a replicated backend may answer reads from a replica that has not seen the latest rotation.
+   */
+  async namespaceHolds(ws: string, snapshot: NamespaceSnapshot): Promise<boolean> {
+    return this.store.compareAndSet(`ns:${ws}`, snapshot.raw, snapshot.raw);
   }
 
   async getLink(ws: string, slug: string): Promise<LinkRecord | null> {

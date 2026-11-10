@@ -13,6 +13,7 @@
     "format": "prettier --write .",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun test",
+    "test:redis": "bun run packages/core/scripts/test-redis.ts",
     "smoke:notion": "bun run packages/core/scripts/smoke-notion.ts"
   },
   "devDependencies": {

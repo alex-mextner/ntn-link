@@ -320,10 +320,21 @@ describe('rotation cleanup failures', () => {
     expect(remaining.map((l) => l.slug).toSorted()).toEqual(['g22', 'g23']);
 
     expect(await h.service.sweepLinks('thsm', rotated.ownerKey)).toEqual({
+      workspace: 'thsm',
       removedLinks: 2,
-      complete: true,
+      cleanupComplete: true,
     });
     expect((await h.service.listLinks('thsm', rotated.ownerKey)).links).toEqual([]);
+
+    // Idempotent: nothing is left to remove, and only this namespace's key is accepted.
+    expect(await h.service.sweepLinks('thsm', rotated.ownerKey)).toEqual({
+      workspace: 'thsm',
+      removedLinks: 0,
+      cleanupComplete: true,
+    });
+    const foreignKey = await claim(h, 'other', 3);
+    expect(await failureCode(h.service.sweepLinks('thsm', foreignKey))).toBe('unauthorized');
+    expect(await failureCode(h.service.sweepLinks('thsm', null))).toBe('unauthorized');
   });
 
   test('a failing key replacement leaves the old key and every link in place', async () => {
@@ -417,5 +428,340 @@ describe('competing rotations', () => {
     expect((await h.service.listLinks('thsm', winner?.value.ownerKey ?? null)).workspace).toBe(
       'thsm',
     );
+  });
+
+  test('a rotation overtaken while it sweeps fails instead of returning a dead key', async () => {
+    const key = await claim(h, 'thsm', 1);
+    h.notion.add(id(31), { workspace: 'thsm', title: 'Link target' });
+    await h.service.createLink({ url: pageUrl('thsm', 31), slug: 'kept' }, key);
+    const a = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, a.nonce);
+
+    // Rotation A pauses inside its sweep, after it has already replaced the key.
+    const fetchPage = h.notion.fetchPage.bind(h.notion);
+    const inSweep = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let paused = false;
+    h.notion.fetchPage = async (request) => {
+      if (request.pageId === id(31) && !paused) {
+        paused = true;
+        inSweep.resolve();
+        await release.promise;
+      }
+      return fetchPage(request);
+    };
+    const pendingA = failureCode(
+      h.service.verify({ url: pageUrl('thsm', 1), nonce: a.nonce, claimToken: a.claimToken }),
+    );
+    await inSweep.promise;
+
+    // Rotation B is issued against A's new key and completes first.
+    const b = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, b.nonce);
+    const rotatedByB = await h.service.verify({
+      url: pageUrl('thsm', 1),
+      nonce: b.nonce,
+      claimToken: b.claimToken,
+    });
+    release.resolve();
+
+    expect(await pendingA).toBe('challenge_expired');
+    expect((await h.service.listLinks('thsm', rotatedByB.ownerKey)).workspace).toBe('thsm');
+  });
+
+  test('a rotate challenge issued before another rotation completed can no longer rotate', async () => {
+    await claim(h, 'thsm', 1);
+    const stale = await challengeFor('thsm', 1, 'rotate');
+    const fresh = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, fresh.nonce);
+    const winner = await h.service.verify({
+      url: pageUrl('thsm', 1),
+      nonce: fresh.nonce,
+      claimToken: fresh.claimToken,
+    });
+
+    publishNonce(1, stale.nonce);
+    const late = h.service.verify({
+      url: pageUrl('thsm', 1),
+      nonce: stale.nonce,
+      claimToken: stale.claimToken,
+    });
+
+    expect(await failureCode(late)).toBe('challenge_expired');
+    expect((await h.service.listLinks('thsm', winner.ownerKey)).workspace).toBe('thsm');
+  });
+});
+
+async function storeAsLegacy(workspace: string, nonce: string): Promise<void> {
+  const stored = await h.store.get(`challenge:${workspace}:${nonce}`);
+  const { namespaceKeyHash: _bound, ...legacy }: Record<string, unknown> = JSON.parse(
+    stored ?? '{}',
+  );
+  await h.store.set(`challenge:${workspace}:${nonce}`, JSON.stringify(legacy));
+}
+
+/**
+ * The replacement is applied (optionally with its reply lost), after which the next three
+ * confirmations of the namespace fail: storage that cannot say who owns the key.
+ */
+function failNamespaceConfirmationsAfterReplacement(options: { loseReply: boolean }): void {
+  const compareAndSet = h.store.compareAndSet.bind(h.store);
+  let applied = false;
+  let failures = 0;
+  h.store.compareAndSet = async (k, expected, value) => {
+    if (k === 'ns:thsm' && applied && failures < 3) {
+      failures++;
+      throw new ApiError('upstream_error', 'storage unavailable');
+    }
+    const written = await compareAndSet(k, expected, value);
+    if (k === 'ns:thsm' && written && !applied) {
+      applied = true;
+      if (options.loseReply) throw new ApiError('upstream_error', 'reply lost');
+    }
+    return written;
+  };
+}
+
+async function expectFreshRotationWorks(): Promise<void> {
+  const fresh = await challengeFor('thsm', 1, 'rotate');
+  publishNonce(1, fresh.nonce);
+  const rotated = await h.service.verify({
+    url: pageUrl('thsm', 1),
+    nonce: fresh.nonce,
+    claimToken: fresh.claimToken,
+  });
+  expect((await h.service.listLinks('thsm', rotated.ownerKey)).workspace).toBe('thsm');
+}
+
+describe('rotation edge cases around the key replacement', () => {
+  test('a replacement applied with a lost reply is recognised and its key returned', async () => {
+    const key = await claim(h, 'thsm', 1);
+    const c = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, c.nonce);
+    const compareAndSet = h.store.compareAndSet.bind(h.store);
+    h.store.compareAndSet = async (k, expected, value) => {
+      const written = await compareAndSet(k, expected, value);
+      if (k === 'ns:thsm' && written) {
+        h.store.compareAndSet = compareAndSet;
+        throw new ApiError('upstream_error', 'reply lost');
+      }
+      return written;
+    };
+
+    const rotated = await h.service.verify({
+      url: pageUrl('thsm', 1),
+      nonce: c.nonce,
+      claimToken: c.claimToken,
+    });
+
+    expect(await failureCode(h.service.listLinks('thsm', key))).toBe('unauthorized');
+    expect((await h.service.listLinks('thsm', rotated.ownerKey)).workspace).toBe('thsm');
+  });
+
+  test('a rotation storage cannot confirm fails closed; a new challenge recovers', async () => {
+    await claim(h, 'thsm', 1);
+    const c = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, c.nonce);
+    const req = { url: pageUrl('thsm', 1), nonce: c.nonce, claimToken: c.claimToken };
+    failNamespaceConfirmationsAfterReplacement({ loseReply: false });
+
+    expect(await failureCode(h.service.verify(req))).toBe('upstream_error');
+    // The challenge is bound to a key version that is gone: it must not look reusable.
+    expect(await failureCode(h.service.verify(req))).toBe('challenge_expired');
+    await expectFreshRotationWorks();
+  });
+
+  test('a lost reply followed by failing confirmations fails closed too', async () => {
+    await claim(h, 'thsm', 1);
+    const c = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, c.nonce);
+    const req = { url: pageUrl('thsm', 1), nonce: c.nonce, claimToken: c.claimToken };
+    failNamespaceConfirmationsAfterReplacement({ loseReply: true });
+
+    expect(await failureCode(h.service.verify(req))).toBe('upstream_error');
+    expect(await failureCode(h.service.verify(req))).toBe('challenge_expired');
+    await expectFreshRotationWorks();
+  });
+
+  test('a lost reply after another rotation took over is reported as overtaken', async () => {
+    await claim(h, 'thsm', 1);
+    const a = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, a.nonce);
+    const compareAndSet = h.store.compareAndSet.bind(h.store);
+    h.store.compareAndSet = async (k, expected, value) => {
+      const written = await compareAndSet(k, expected, value);
+      if (k !== 'ns:thsm' || !written) return written;
+      // A's write lands, then another rotation supersedes it before A learns anything
+      // about its own write.
+      h.store.compareAndSet = compareAndSet;
+      const c = await h.service.issueChallenge({ url: pageUrl('thsm', 1), action: 'rotate' });
+      publishNonce(1, c.nonce);
+      await h.service.verify({ url: pageUrl('thsm', 1), nonce: c.nonce, claimToken: c.claimToken });
+      throw new ApiError('upstream_error', 'reply lost');
+    };
+
+    expect(
+      await failureCode(
+        h.service.verify({ url: pageUrl('thsm', 1), nonce: a.nonce, claimToken: a.claimToken }),
+      ),
+    ).toBe('challenge_expired');
+  });
+
+  test('an overtaken rotation never returns its key, even when the final confirmation fails', async () => {
+    const key = await claim(h, 'thsm', 1);
+    h.notion.add(id(31), { workspace: 'thsm', title: 'Link target' });
+    await h.service.createLink({ url: pageUrl('thsm', 31), slug: 'kept' }, key);
+    const a = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, a.nonce);
+
+    const fetchPage = h.notion.fetchPage.bind(h.notion);
+    const inSweep = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let paused = false;
+    h.notion.fetchPage = async (request) => {
+      if (request.pageId === id(31) && !paused) {
+        paused = true;
+        inSweep.resolve();
+        await release.promise;
+      }
+      return fetchPage(request);
+    };
+    const pendingA = h.service.verify({
+      url: pageUrl('thsm', 1),
+      nonce: a.nonce,
+      claimToken: a.claimToken,
+    });
+    const outcomeA = pendingA.then(
+      (value) => ({ ownerKey: value.ownerKey }),
+      (error: unknown) => ({ ownerKey: null, error }),
+    );
+    await inSweep.promise;
+
+    const b = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, b.nonce);
+    const rotatedByB = await h.service.verify({
+      url: pageUrl('thsm', 1),
+      nonce: b.nonce,
+      claimToken: b.claimToken,
+    });
+    // From now on A cannot reach the primary to confirm its key.
+    const compareAndSet = h.store.compareAndSet.bind(h.store);
+    h.store.compareAndSet = async (k, expected, value) => {
+      if (k === 'ns:thsm') throw new ApiError('upstream_error', 'storage unavailable');
+      return compareAndSet(k, expected, value);
+    };
+    release.resolve();
+
+    expect((await outcomeA).ownerKey).toBeNull();
+    h.store.compareAndSet = compareAndSet;
+    expect((await h.service.listLinks('thsm', rotatedByB.ownerKey)).workspace).toBe('thsm');
+  });
+
+  test('lagging replica reads do not hide a completed rotation', async () => {
+    await claim(h, 'thsm', 1);
+    const c = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, c.nonce);
+    const staleRaw = await h.store.get('ns:thsm');
+    const get = h.store.get.bind(h.store);
+    h.store.get = async (k) => (k === 'ns:thsm' ? staleRaw : get(k));
+
+    const rotated = await h.service.verify({
+      url: pageUrl('thsm', 1),
+      nonce: c.nonce,
+      claimToken: c.claimToken,
+    });
+
+    h.store.get = get;
+    expect((await h.service.listLinks('thsm', rotated.ownerKey)).workspace).toBe('thsm');
+  });
+
+  test('lagging replica reads cannot hide that another rotation took over', async () => {
+    const key = await claim(h, 'thsm', 1);
+    h.notion.add(id(31), { workspace: 'thsm', title: 'Link target' });
+    await h.service.createLink({ url: pageUrl('thsm', 31), slug: 'kept' }, key);
+    const a = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, a.nonce);
+    const fetchPage = h.notion.fetchPage.bind(h.notion);
+    const inSweep = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let paused = false;
+    h.notion.fetchPage = async (request) => {
+      if (request.pageId === id(31) && !paused) {
+        paused = true;
+        inSweep.resolve();
+        await release.promise;
+      }
+      return fetchPage(request);
+    };
+    const pendingA = failureCode(
+      h.service.verify({ url: pageUrl('thsm', 1), nonce: a.nonce, claimToken: a.claimToken }),
+    );
+    await inSweep.promise;
+    // A replica that only knows A's rotation, while B's completes on the primary.
+    const staleRaw = await h.store.get('ns:thsm');
+    const b = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, b.nonce);
+    const rotatedByB = await h.service.verify({
+      url: pageUrl('thsm', 1),
+      nonce: b.nonce,
+      claimToken: b.claimToken,
+    });
+    const get = h.store.get.bind(h.store);
+    h.store.get = async (k) => (k === 'ns:thsm' ? staleRaw : get(k));
+    release.resolve();
+
+    expect(await pendingA).toBe('challenge_expired');
+    h.store.get = get;
+    expect((await h.service.listLinks('thsm', rotatedByB.ownerKey)).workspace).toBe('thsm');
+  });
+
+  test('a lagging replica returning the previous key hash does not bind a new rotate challenge to it', async () => {
+    await claim(h, 'thsm', 1);
+    const staleRaw = await h.store.get('ns:thsm');
+    const first = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, first.nonce);
+    await h.service.verify({ url: pageUrl('thsm', 1), nonce: first.nonce, claimToken: first.claimToken });
+
+    // A cold instance whose replica still answers reads with the pre-rotation record.
+    const get = h.store.get.bind(h.store);
+    let stale = 1;
+    h.store.get = async (k) => (k === 'ns:thsm' && stale-- > 0 ? staleRaw : get(k));
+    const second = await challengeFor('thsm', 1, 'rotate');
+    publishNonce(1, second.nonce);
+    h.store.get = get;
+    expect(stale).toBeLessThan(1);
+
+    const rotated = await h.service.verify({
+      url: pageUrl('thsm', 1),
+      nonce: second.nonce,
+      claimToken: second.claimToken,
+    });
+    expect((await h.service.listLinks('thsm', rotated.ownerKey)).workspace).toBe('thsm');
+  });
+
+  describe('challenges stored before they were bound to a key version', () => {
+    test('a legacy claim challenge still verifies', async () => {
+      const c = await challengeFor('thsm', 1, 'claim');
+      await storeAsLegacy('thsm', c.nonce);
+      publishNonce(1, c.nonce);
+      const claimed = await h.service.verify({
+        url: pageUrl('thsm', 1),
+        nonce: c.nonce,
+        claimToken: c.claimToken,
+      });
+      expect(claimed.action).toBe('claim');
+    });
+
+    test('a legacy rotate challenge is reported as expired and the key stays', async () => {
+      const key = await claim(h, 'thsm', 1);
+      const c = await challengeFor('thsm', 1, 'rotate');
+      await storeAsLegacy('thsm', c.nonce);
+      publishNonce(1, c.nonce);
+      const failure = failureCode(
+        h.service.verify({ url: pageUrl('thsm', 1), nonce: c.nonce, claimToken: c.claimToken }),
+      );
+      expect(await failure).toBe('challenge_expired');
+      expect((await h.service.listLinks('thsm', key)).workspace).toBe('thsm');
+    });
   });
 });
