@@ -19,7 +19,7 @@ import {
   storedWorkspaces,
   type KeyStorage,
 } from './keys';
-import { ru } from './strings';
+import { en } from './strings';
 import { checkSlug } from './slug';
 import { workspaceHint } from './text';
 
@@ -282,7 +282,7 @@ export function createController(
         error: {
           ...toFlowError(error),
           scope: 'general',
-          message: `${ru.fastUpdateFailed}: ${describeError(error)}`,
+          message: `${en.fastUpdateFailed}: ${describeError(error)}`,
         },
       });
     }
@@ -306,12 +306,12 @@ export function createController(
       const removedLinks = cleanup.removedLinks + response.removedLinks;
       settle(
         response.cleanupComplete
-          ? { ...cleanup, removedLinks, status: 'done', message: ru.cleanupDone(removedLinks) }
+          ? { ...cleanup, removedLinks, status: 'done', message: en.cleanupDone(removedLinks) }
           : {
               ...cleanup,
               removedLinks,
               status: 'incomplete',
-              message: ru.cleanupIncomplete(removedLinks),
+              message: en.cleanupIncomplete(removedLinks),
             },
       );
     } catch (error) {
@@ -319,7 +319,7 @@ export function createController(
       settle({
         ...cleanup,
         status: unsupported ? 'unsupported' : 'error',
-        message: unsupported ? ru.cleanupUnsupported : describeError(error),
+        message: unsupported ? en.cleanupUnsupported : describeError(error),
       });
     }
   }
@@ -335,7 +335,7 @@ export function createController(
     async loadLinks(workspace) {
       const key = keyFor(workspace);
       if (!key) {
-        return { workspace, status: 'error', links: [], error: ru.errors.unauthorized };
+        return { workspace, status: 'error', links: [], error: en.errors.unauthorized };
       }
       try {
         const { links } = await api.listLinks(workspace, key);
@@ -349,7 +349,7 @@ export function createController(
     },
     async deleteLink(workspace, slug) {
       const key = keyFor(workspace);
-      if (!key) return ru.errors.unauthorized;
+      if (!key) return en.errors.unauthorized;
       try {
         await api.deleteLink(workspace, slug, key);
         return null;

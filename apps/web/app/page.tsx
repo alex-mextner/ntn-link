@@ -1,15 +1,22 @@
 import { App } from '@/components/App';
-import { ru } from '@/lib/client/strings';
+import { Wordmark } from '@/components/Wordmark';
+import { en } from '@/lib/client/strings';
 
 /** Server-rendered shell; the only client component is <App />. */
 export default function HomePage() {
   return (
     <main className="page">
-      <header className="header">
-        <h1>{ru.appName}</h1>
-        <p className="tagline">{ru.tagline}</p>
+      <header className="top">
+        <Wordmark />
       </header>
+      <section className="hero">
+        <h1>
+          {en.headlineLead} <span className="grad">{en.headlineAccent}</span>
+        </h1>
+        <p className="tagline">{en.tagline}</p>
+      </section>
       <App />
+      <footer className="foot">{en.footer}</footer>
     </main>
   );
 }

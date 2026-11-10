@@ -5,7 +5,7 @@
  * docs/fast-variant.md: `article > header > h1 + time`, then the body blocks, then
  * `footer > a.orig`. Change one only together with the other.
  */
-import { escapeHtml } from '../og-html';
+import { escapeHtml, FAVICON_LINK } from '../og-html';
 import { ogLocale } from '../metadata';
 import { CRITICAL_CSS } from './css';
 import { articleJsonLd } from './jsonld';
@@ -77,11 +77,13 @@ export function renderFastPage(input: FastPageInput): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
+${FAVICON_LINK}
 ${metaTags(input, selfUrl)}
 <script type="application/ld+json">${articleJsonLd(input, selfUrl)}</script>
 <style>${CRITICAL_CSS}</style>
 </head>
 <body>
+<main>
 <article>
 <header>
 <h1>${title}</h1>
@@ -89,6 +91,7 @@ ${timeTag(input.editedAt)}
 </header>
 ${input.body.html}<footer><a class="orig" href="${escapeHtml(input.notionUrl)}" rel="noopener nofollow">Open the original in Notion</a></footer>
 </article>
+</main>
 </body>
 </html>
 `;

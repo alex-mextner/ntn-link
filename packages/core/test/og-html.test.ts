@@ -71,3 +71,38 @@ test('the gone page has no redirect and no script', () => {
   expect(out).not.toContain('<script');
   expect(out).toContain('no longer public');
 });
+
+describe('stub page chrome', () => {
+  const pages = {
+    redirect: renderRedirectHtml(base),
+    gone: renderGoneHtml(),
+  };
+
+  test.each(Object.entries(pages))(
+    '%s page styles itself inline without any request',
+    (_name, out) => {
+      expect(out).toMatch(/<style>[^<]+<\/style>/);
+      expect(out).not.toMatch(/url\(|@import|@font-face|<img\b/);
+      // The only <link> is the icon, inlined as a data URI: no request, no foreign host.
+      const links = out.match(/<link\b[^>]*>/g) ?? [];
+      for (const link of links)
+        expect(link).toMatch(
+          /^<link rel="icon" href="data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+">$/,
+        );
+    },
+  );
+
+  test('the gone page names no host at all', () => {
+    expect(pages.gone).not.toMatch(/https?:\/\//);
+  });
+
+  test('the visible redirect message is English whatever the page language', () => {
+    expect(pages.redirect).toContain('<p lang="en">Opening the Notion page…</p>');
+    expect(pages.redirect).toContain('<html lang="ru">');
+  });
+
+  test('the gone page is English and says what happened', () => {
+    expect(pages.gone).toContain('<html lang="en">');
+    expect(pages.gone).toContain('unpublished or deleted');
+  });
+});
