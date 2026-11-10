@@ -1,0 +1,5 @@
+docs/
+bun.lock
+.next/
+packages/core/test/fixtures/
+apps/web/assets/
