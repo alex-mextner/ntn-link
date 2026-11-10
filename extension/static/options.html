@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ntn-link options</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        color: #1b1b1b;
+      }
+      h1 {
+        font-size: 1.4rem;
+      }
+      h2 {
+        font-size: 1.1rem;
+        margin-top: 2rem;
+      }
+      fieldset {
+        border: 1px solid #bbb;
+        border-radius: 6px;
+        margin: 1rem 0;
+      }
+      label {
+        display: block;
+        margin: 0.5rem 0 0.2rem;
+      }
+      input[type='text'],
+      input[type='password'] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.4rem;
+      }
+      button {
+        padding: 0.4rem 0.9rem;
+        margin: 0.5rem 0.5rem 0 0;
+      }
+      code {
+        background: #f0f0f0;
+        padding: 0.1rem 0.3rem;
+        border-radius: 3px;
+      }
+      .nonce {
+        font-size: 1.1rem;
+        user-select: all;
+      }
+      .status {
+        min-height: 1.5rem;
+      }
+      .status[data-kind='error'] {
+        color: #b00020;
+      }
+      .status[data-kind='ok'] {
+        color: #1b5e20;
+      }
+      .privacy {
+        background: #f6f6f0;
+        border-left: 4px solid #888;
+        padding: 0.6rem 0.9rem;
+      }
+      li.ws {
+        list-style: none;
+        margin: 0.4rem 0;
+      }
+      ul {
+        padding-left: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ntn-link</h1>
+    <p>Origin: <code id="origin"></code> (set when the extension is built).</p>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <h2>Workspaces</h2>
+    <p class="privacy" id="privacy">
+      The toolbar button and shortcuts only act when you press them, on the page you are on.
+      <strong>Replace Notion's Copy link</strong> is off by default and is switched on per
+      workspace. When on, copying a link on a public page of this workspace makes the extension
+      check that the page is public (direct request to Notion, no cookies) and then ask ntn-link for
+      the short link. Private pages are never sent to ntn-link.
+    </p>
+    <ul id="workspaces" aria-label="Workspaces"></ul>
+    <form id="add-form">
+      <label for="add-ws">Add a workspace (the part before <code>.notion.site</code>)</label>
+      <input id="add-ws" type="text" autocomplete="off" spellcheck="false" />
+      <button type="submit">Add</button>
+    </form>
+
+    <h2>Claim a workspace</h2>
+    <p>
+      Prove you control a workspace to get an owner key. Paste the URL of one of its public pages.
+    </p>
+    <form id="challenge-form">
+      <label for="claim-url">Public Notion page URL</label>
+      <input id="claim-url" type="text" autocomplete="off" spellcheck="false" />
+      <fieldset>
+        <legend>Action</legend>
+        <label
+          ><input type="radio" name="action" value="claim" checked /> Claim (new workspace)</label
+        >
+        <label><input type="radio" name="action" value="rotate" /> Replace a lost key</label>
+      </fieldset>
+      <button type="submit">Start</button>
+    </form>
+    <section id="verify" hidden>
+      <p>
+        Put this text anywhere in the title of a public page of the workspace, then press Verify:
+      </p>
+      <p><code id="nonce" class="nonce"></code></p>
+      <button type="button" id="copy-nonce">Copy</button>
+      <button type="button" id="verify-button">Verify</button>
+    </section>
+
+    <h2>Owner key from the CLI</h2>
+    <form id="key-form">
+      <label for="key-ws">Workspace</label>
+      <input id="key-ws" type="text" autocomplete="off" spellcheck="false" />
+      <label for="key-value">Owner key</label>
+      <input id="key-value" type="password" autocomplete="off" spellcheck="false" />
+      <button type="submit">Save key</button>
+    </form>
+    <script src="options.js"></script>
+  </body>
+</html>
