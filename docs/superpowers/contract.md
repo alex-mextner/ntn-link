@@ -222,5 +222,6 @@ compared with the database's `clock_timestamp()`, never the app clock) plus a bo
 at most once a minute per instance) run by a TTL-carrying write. Failures map to `upstream_error`
 with the same 3 s deadline and redacted one-line `storage_failure` log as `UpstashStore`.
 Tests: `bun test` (PGlite and a PGlite-backed Neon HTTP stand-in), `bun run test:postgres` (real
-Postgres in docker, true concurrency) and `DATABASE_URL=... bun run test:neon` (the real database,
-keys under a unique prefix, removed afterwards).
+Postgres in docker, true concurrency) and `NTN_TEST_DATABASE_URL=... NTN_ALLOW_LIVE_DB_TESTS=1 bun run test:neon`
+(a separate Neon branch, guarded against the app's own database; keys under a unique prefix, removed
+afterwards even after failures).

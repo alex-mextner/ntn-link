@@ -130,7 +130,8 @@ export function defineStoreContract(
     const h = makeHarness();
     const { store } = h;
     const fresh = (): string => `${h.keyPrefix ?? 't:'}${randomBytes(6).toString('hex')}`;
-    if (h.dispose) afterAll(h.dispose);
+    // A live-database cleanup retries with pauses (about 34 s at worst), so it gets more than bun's 5 s.
+    if (h.dispose) afterAll(h.dispose, 60_000);
     const { advanceSeconds, ttlSecondsOf } = h;
     const timeTravel = advanceSeconds === undefined;
     const noTtlProbe = ttlSecondsOf === undefined;
