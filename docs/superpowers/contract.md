@@ -184,7 +184,9 @@ interface Service {
   `safeFetch(url, options)` with `allowNotionPageUrl` / `allowNotionImageUrl` allowlists and `BOT_USER_AGENT`.
 - Storage: `Store` (`get`, `set(key, value, { ttlSeconds?, ifAbsent? })`, `compareAndSet`,
   `delete`, `increment(key, ttlSeconds)`, `createIndexed`, `deleteIndexed`, `moveIndexed`,
-  `setMembers`), `MemoryStore(now?)`, `UpstashStore({ url, token }, fetch?)`,
+  `setMembers`), `MemoryStore(now?)`, `UpstashStore({ url, token, timeoutMs? })`,
+  `PostgresStore({ executor, timeoutMs?, purgeIntervalMs? })` with `neonHttpExecutor(url)` (the
+  `SqlExecutor` seam: `query` and `transaction`) and `databaseUrlFromEnv(env)` (reads `DATABASE_URL`),
   `upstashConfigFromEnv(env)` (reads `UPSTASH_REDIS_REST_URL`/`_TOKEN`, falling back to
   `KV_REST_API_URL`/`_TOKEN`; null when neither pair is set), `Repository`.
 - Crypto: `sha256Hex`, `timingSafeEqual`.
@@ -197,3 +199,24 @@ interface Service {
 `challenge-attempts:<ws>:<nonce>` (counter, cap 5); `rl:<action>:<hash>:<window>` (rate limit counters).
 `UpstashStore` implements every multi-step operation as one Lua script (`EVAL`), tested against a
 real Redis with `bun run test:redis`.
+
+## Store selection and backends
+
+`apps/web` picks the store from the environment, in this order: `DATABASE_URL` (`PostgresStore` over
+the Neon HTTP driver), then `UPSTASH_REDIS_REST_URL`/`_TOKEN` or `KV_REST_API_URL`/`_TOKEN`
+(`UpstashStore`), then `MemoryStore` in development only; in production nothing configured is a
+`500 server_misconfigured`. All three implement the same `Store` contract
+(`packages/core/test/store-contract.ts`, run against each).
+
+`PostgresStore` keeps values in `ntn_kv(key, value, expires_at)` and set members in
+`ntn_set_members(set_key, member)`; `ensureSchema` runs lazily once per instance under an advisory
+lock. Every operation is one SQL statement (`INSERT ... ON CONFLICT`, `UPDATE ... WHERE value = $expected`);
+`createIndexed`/`deleteIndexed`/`moveIndexed` first take a transaction-scoped advisory lock on the set
+key in a two-statement batch (one transaction), so the cap and the record/member pairing hold under
+concurrent callers while unrelated sets never wait for each other. Expiry is lazy (`expires_at`
+compared with the database's `clock_timestamp()`, never the app clock) plus a bounded purge (200 rows,
+at most once a minute per instance) run by a TTL-carrying write. Failures map to `upstream_error`
+with the same 3 s deadline and redacted one-line `storage_failure` log as `UpstashStore`.
+Tests: `bun test` (PGlite and a PGlite-backed Neon HTTP stand-in), `bun run test:postgres` (real
+Postgres in docker, true concurrency) and `DATABASE_URL=... bun run test:neon` (the real database,
+keys under a unique prefix, removed afterwards).

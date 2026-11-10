@@ -9,14 +9,13 @@ import { revalidatePath } from 'next/cache';
 import {
   ApiError,
   MemoryStore,
-  UpstashStore,
   createPageFetcher,
   createService,
-  upstashConfigFromEnv,
   type PageFetcher,
   type Service,
   type Store,
 } from '@ntn-link/core';
+import { chooseStore } from './store';
 import { createTestFetcher, type TestFetcher } from './test-fetcher';
 
 interface Runtime {
@@ -45,15 +44,19 @@ function resolveOrigin(): string {
   return `http://localhost:${process.env.PORT ?? '3000'}`;
 }
 
+/** Which store was chosen is logged by kind, never with a URL or credential. */
 function resolveStore(): Store {
-  const config = upstashConfigFromEnv(process.env);
-  if (config) return new UpstashStore(config);
+  const chosen = chooseStore(process.env);
+  if (chosen) {
+    console.info(`ntn-link: using the ${chosen.kind} store.`);
+    return chosen.store;
+  }
   if (isProduction()) {
     throw misconfigured(
-      'No storage configured: set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_URL and KV_REST_API_TOKEN).',
+      'No storage configured: set DATABASE_URL (Postgres/Neon), or UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_URL and KV_REST_API_TOKEN).',
     );
   }
-  console.warn('ntn-link: no Upstash config, using the in-memory store (development only).');
+  console.warn('ntn-link: no store configured, using the in-memory store (development only).');
   return new MemoryStore();
 }
 
