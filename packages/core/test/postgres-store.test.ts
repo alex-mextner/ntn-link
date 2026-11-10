@@ -39,13 +39,20 @@ function recording(inner: SqlExecutor): Recording {
   };
 }
 
+const isWarmup = (statement: SqlStatement): boolean => statement.text === 'SELECT 1 AS outcome';
+
+/** The warm-up has its own tests; everywhere else the database is awake and only statements fail. */
 const failing = (error: Error): SqlExecutor => ({
-  query: () => Promise.reject(error),
+  query: (statement) =>
+    isWarmup(statement) ? Promise.resolve([{ outcome: 1 }]) : Promise.reject(error),
   transaction: () => Promise.reject(error),
 });
 
 const hanging: SqlExecutor = {
-  query: () => new Promise<readonly SqlRow[]>(() => {}),
+  query: (statement) =>
+    isWarmup(statement)
+      ? Promise.resolve([{ outcome: 1 }])
+      : new Promise<readonly SqlRow[]>(() => {}),
   transaction: () => new Promise<ReadonlyArray<readonly SqlRow[]>>(() => {}),
 };
 
@@ -331,7 +338,8 @@ describe('PostgresStore deadlines and errors', () => {
     silenced();
     const seen: AbortSignal[] = [];
     const executor: SqlExecutor = {
-      query: (_statement, signal) => {
+      query: (statement, signal) => {
+        if (isWarmup(statement)) return Promise.resolve([{ outcome: 1 }]);
         seen.push(signal);
         return new Promise<readonly SqlRow[]>(() => {});
       },
@@ -415,5 +423,138 @@ describe('PostgresStore deadlines and errors', () => {
       );
       expect(failure).toMatchObject({ code: 'upstream_error' });
     }
+  });
+});
+
+/** An executor whose first answer takes `coldMs` (a suspended database), later ones are instant. */
+function sleepy(coldMs: number) {
+  const inner = recording(pgliteExecutor(new PGlite()));
+  const state = { cold: true };
+  const waking = <T>(run: () => Promise<T>, signal: AbortSignal): Promise<T> => {
+    if (!state.cold) return run();
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        state.cold = false;
+        run().then(resolve, reject);
+      }, coldMs);
+      signal.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      });
+    });
+  };
+  const executor: SqlExecutor = {
+    query: (statement, signal) => waking(() => inner.query(statement, signal), signal),
+    transaction: (batch, signal) => waking(() => inner.transaction(batch, signal), signal),
+  };
+  return { executor, inner, state };
+}
+
+describe('PostgresStore warm-up (Neon scale-to-zero)', () => {
+  test('a cold first call outlasts the statement deadline, waits for the warm-up and succeeds', async () => {
+    const { executor, inner } = sleepy(120);
+    const store = new PostgresStore({ executor, timeoutMs: 50, warmupTimeoutMs: 1000 });
+    expect(await store.set('k', 'v')).toBe(true);
+    expect(await store.get('k')).toBe('v');
+    expect(inner.statements[0]?.text).toBe('SELECT 1 AS outcome');
+  });
+
+  test('concurrent first calls share one warm-up', async () => {
+    const { executor, inner } = sleepy(60);
+    const store = new PostgresStore({ executor, timeoutMs: 50, warmupTimeoutMs: 1000 });
+    await Promise.all([store.get('a'), store.get('b'), store.set('c', 'v')]);
+    expect(inner.statements.filter((s) => isWarmup(s))).toHaveLength(1);
+  });
+
+  test('a warm instance does not warm up again; an idle gap does', async () => {
+    let now = 1_000_000;
+    const exec = recording(pgliteExecutor(new PGlite()));
+    const store = new PostgresStore({ executor: exec, idleMs: 240_000, now: () => now });
+    const warmups = () => exec.statements.filter((s) => isWarmup(s)).length;
+    await store.get('k');
+    expect(warmups()).toBe(1);
+    now += 239_000;
+    await store.get('k');
+    expect(warmups()).toBe(1);
+    now += 239_000; // each answer restarts the idle clock
+    await store.get('k');
+    expect(warmups()).toBe(1);
+    now += 241_000;
+    await store.get('k');
+    expect(warmups()).toBe(2);
+    await store.get('k');
+    expect(warmups()).toBe(2);
+  });
+
+  test('a warm-up slower than its deadline is an upstream_error, logged once as warmup-timeout', async () => {
+    const log = silenced();
+    const exec = recording(hanging);
+    const slow: SqlExecutor = {
+      query: (statement, signal) => {
+        exec.statements.push(statement);
+        return new Promise<readonly SqlRow[]>((_resolve, reject) =>
+          signal.addEventListener('abort', () => reject(signal.reason)),
+        );
+      },
+      transaction: exec.transaction.bind(exec),
+    };
+    const store = new PostgresStore({ executor: slow, timeoutMs: 20, warmupTimeoutMs: 60 });
+    const started = Date.now();
+    const results = await Promise.all(
+      [store.get('a'), store.get('b')].map((call) => call.catch((error: unknown) => error)),
+    );
+    for (const failure of results) {
+      expect(failure).toBeInstanceOf(ApiError);
+      expect(failure).toMatchObject({ code: 'upstream_error', status: 502 });
+    }
+    expect(Date.now() - started).toBeGreaterThanOrEqual(50);
+    expect(exec.statements.filter((s) => isWarmup(s))).toHaveLength(1);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({
+      event: 'storage_failure',
+      command: 'WARMUP',
+      kind: 'warmup-timeout',
+    });
+  });
+
+  test('a failed warm-up does not poison later calls', async () => {
+    silenced();
+    const inner = pgliteExecutor(new PGlite());
+    let down = true;
+    const executor: SqlExecutor = {
+      query: (statement, signal) =>
+        down && isWarmup(statement)
+          ? Promise.reject(new TypeError('fetch failed'))
+          : inner.query(statement, signal),
+      transaction: (batch, signal) => inner.transaction(batch, signal),
+    };
+    const store = new PostgresStore({ executor });
+    await expect(store.get('k')).rejects.toMatchObject({ code: 'upstream_error' });
+    down = false;
+    expect(await store.set('k', 'v')).toBe(true);
+    expect(await store.get('k')).toBe('v');
+  });
+
+  test('real statements keep the normal deadline after the warm-up, and are never retried', async () => {
+    silenced();
+    const seen: Array<{ text: string; signal: AbortSignal }> = [];
+    const executor: SqlExecutor = {
+      query: (statement, signal) => {
+        seen.push({ text: statement.text, signal });
+        if (isWarmup(statement) || /to_regclass/.test(statement.text)) {
+          return Promise.resolve([{ outcome: 'present' }]);
+        }
+        return new Promise<readonly SqlRow[]>(() => {}); // never answers
+      },
+      transaction: () => Promise.reject(new Error('unused')),
+    };
+    const store = new PostgresStore({ executor, timeoutMs: 40, warmupTimeoutMs: 5000 });
+    const started = Date.now();
+    await expect(store.increment('k', 60)).rejects.toMatchObject({ code: 'upstream_error' });
+    expect(Date.now() - started).toBeLessThan(1000);
+    const increments = seen.filter((entry) => /INSERT INTO ntn_kv/.test(entry.text));
+    expect(increments).toHaveLength(1);
+    expect(seen.filter((entry) => isWarmup({ text: entry.text, params: [] }))).toHaveLength(1);
+    expect(increments[0]?.signal.aborted).toBe(true);
   });
 });

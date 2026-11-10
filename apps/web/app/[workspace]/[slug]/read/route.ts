@@ -13,6 +13,12 @@ import { buildFastPage } from '@ntn-link/core/render';
 import { errorResponse } from '@/lib/http';
 import { getService, linkCacheTag } from '@/lib/service';
 
+/**
+ * Room for the 10 s database warm-up (Neon scale-to-zero, see PostgresStore) plus paging
+ * through Notion chunks (up to 40 sequential requests with their own deadlines).
+ */
+export const maxDuration = 60;
+
 const PAGE_CACHE_CONTROL =
   'public, max-age=0, s-maxage=60, stale-while-revalidate=86400, stale-if-error=86400';
 const NEGATIVE_CACHE_CONTROL = 'public, max-age=0, s-maxage=60';

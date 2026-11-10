@@ -4,11 +4,16 @@
  * run carries a unique `ntnlinktest:<random>:` prefix and is removed again afterwards, so it is
  * safe against a database that serves real data. Time travel only touches this run's rows.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { databaseUrlFromEnv } from '../src/postgres-store';
 import { neonHttpExecutor } from '../src/sql-executor';
 import { sqlHarness } from './support/sql-harness';
 import { defineStoreContract } from './store-contract';
+
+/** 220 parallel creations on one namespace measured 36 s end to end on Neon (lock queue + HTTP). */
+const PARALLEL_QUEUE_DEADLINE_MS = 90_000;
+
+setDefaultTimeout(PARALLEL_QUEUE_DEADLINE_MS + 30_000);
 
 const url = databaseUrlFromEnv(process.env);
 const executor = url ? neonHttpExecutor(url) : null;
@@ -17,7 +22,7 @@ defineStoreContract(
   'PostgresStore on Neon',
   () => {
     if (!executor) throw new Error('unreachable: the suite is skipped without DATABASE_URL');
-    return sqlHarness(executor);
+    return sqlHarness(executor, PARALLEL_QUEUE_DEADLINE_MS);
   },
   { skip: executor === null },
 );

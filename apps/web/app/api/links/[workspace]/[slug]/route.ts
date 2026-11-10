@@ -8,6 +8,9 @@ import {
 import { bearerKey, guarded, json, limit, readBody } from '@/lib/http';
 import { getService } from '@/lib/service';
 
+/** Room for the 10 s database warm-up (Neon scale-to-zero, see PostgresStore) plus the request's own work. */
+export const maxDuration = 30;
+
 interface Context {
   params: Promise<{ workspace: string; slug: string }>;
 }

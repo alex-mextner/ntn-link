@@ -15,13 +15,18 @@ export interface SqlHarness extends StoreHarness {
   sql: (text: string, ...params: SqlParam[]) => Promise<readonly SqlRow[]>;
 }
 
-export function sqlHarness(executor: SqlExecutor): SqlHarness {
+/**
+ * `timeoutMs` is the store's per-statement deadline. A remote database needs a longer one for
+ * the contract's parallel-creation cases: hundreds of calls queue on one set's advisory lock,
+ * so the last waits for all the others and the production 3 s deadline would fire on it.
+ */
+export function sqlHarness(executor: SqlExecutor, timeoutMs?: number): SqlHarness {
   const keyPrefix = `ntnlinktest:${randomBytes(6).toString('hex')}:`;
   const like = `%${keyPrefix}%`;
   const sql = (text: string, ...params: SqlParam[]): Promise<readonly SqlRow[]> =>
     executor.query({ text, params }, AbortSignal.timeout(STATEMENT_DEADLINE_MS));
   return {
-    store: new PostgresStore({ executor }),
+    store: new PostgresStore({ executor, timeoutMs }),
     keyPrefix,
     sql,
     advanceSeconds: async (seconds) => {

@@ -25,6 +25,7 @@
  * `compareAndSet` keeps the expiry, `increment` applies its TTL when the counter has none,
  * records written by createIndexed/moveIndexed never expire, set members never expire.
  */
+import { ApiError } from './errors';
 import {
   MalformedReplyError,
   type SqlExecutor,
@@ -45,6 +46,18 @@ export interface PostgresConfig {
   executor: SqlExecutor;
   /** Per-request deadline in ms (default 3000); the schema step and every operation get their own. */
   timeoutMs?: number;
+  /**
+   * Deadline in ms (default 10000) of the `SELECT 1` that wakes a database that scaled to
+   * zero. Only that warm-up gets it; every real statement keeps `timeoutMs`.
+   */
+  warmupTimeoutMs?: number;
+  /**
+   * Idle gap in ms after which the database counts as possibly suspended and the next call
+   * warms it up again (default 240000; Neon's free plan suspends after 5 minutes).
+   */
+  idleMs?: number;
+  /** Clock for the idle gap, ms (default `Date.now`); tests inject their own. */
+  now?: () => number;
   /** Minimum gap between opportunistic purges of expired rows, per instance (default 60 s). */
   purgeIntervalMs?: number;
 }
@@ -58,6 +71,10 @@ export function databaseUrlFromEnv(env: {
 }
 
 const DEFAULT_PURGE_INTERVAL_MS = 60_000;
+const DEFAULT_WARMUP_TIMEOUT_MS = 10_000;
+const DEFAULT_IDLE_MS = 240_000;
+
+const WARMUP_SQL = 'SELECT 1 AS outcome';
 const PURGE_BATCH = 200;
 
 /** Expired rows are invisible to every statement below. */
@@ -260,6 +277,12 @@ export class PostgresStore implements Store {
   readonly #executor: SqlExecutor;
   readonly #timeoutMs: number;
   readonly #purgeIntervalMs: number;
+  readonly #warmupTimeoutMs: number;
+  readonly #idleMs: number;
+  readonly #now: () => number;
+  #warming: Promise<void> | undefined;
+  /** When the database last answered; undefined until it has (it may be asleep). */
+  #lastAnswered: number | undefined;
   #schema: Promise<void> | undefined;
   #lastPurge = Number.NEGATIVE_INFINITY;
 
@@ -267,6 +290,9 @@ export class PostgresStore implements Store {
     this.#executor = config.executor;
     this.#timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.#purgeIntervalMs = config.purgeIntervalMs ?? DEFAULT_PURGE_INTERVAL_MS;
+    this.#warmupTimeoutMs = config.warmupTimeoutMs ?? DEFAULT_WARMUP_TIMEOUT_MS;
+    this.#idleMs = config.idleMs ?? DEFAULT_IDLE_MS;
+    this.#now = config.now ?? Date.now;
   }
 
   /**
@@ -274,14 +300,47 @@ export class PostgresStore implements Store {
    * HTTP call), and the race guarantees the deadline even for an executor that ignores it.
    * No retries: a replayed increment or compare-and-set after a lost reply could apply twice.
    */
-  async #withDeadline<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
-    const signal = AbortSignal.timeout(this.#timeoutMs);
+  async #withDeadline<T>(
+    work: (signal: AbortSignal) => Promise<T>,
+    timeoutMs = this.#timeoutMs,
+  ): Promise<T> {
+    const signal = AbortSignal.timeout(timeoutMs);
     const deadline = abortion(signal);
     try {
-      return await Promise.race([work(signal), deadline.promise]);
+      const result = await Promise.race([work(signal), deadline.promise]);
+      this.#lastAnswered = this.#now();
+      return result;
     } finally {
       deadline.release();
     }
+  }
+
+  /**
+   * A database that scaled to zero needs several seconds for its first query, more than a
+   * real statement's deadline. Before the first statement of an instance, and after an idle
+   * gap, a `SELECT 1` (idempotent, so nothing can double-apply) gets the long warm-up
+   * deadline; the real statement then runs under its normal one. No real statement is ever
+   * retried. Concurrent callers share one warm-up; a failed one is not remembered.
+   */
+  async #ensureWarm(): Promise<void> {
+    if (this.#warming === undefined) {
+      const answered = this.#lastAnswered;
+      if (answered !== undefined && this.#now() - answered < this.#idleMs) return;
+      this.#warming = this.#withDeadline(
+        (signal) => this.#executor.query(statement(WARMUP_SQL), signal),
+        this.#warmupTimeoutMs,
+      )
+        .then(() => undefined)
+        .catch((error: unknown) => {
+          const kind = failureKind(error);
+          this.#failures.record('WARMUP', error, kind === 'timeout' ? 'warmup-timeout' : kind);
+          throw storageFailed();
+        })
+        .finally(() => {
+          this.#warming = undefined;
+        });
+    }
+    return this.#warming;
   }
 
   /** Idempotent, shared by concurrent first callers, retried by the next call after a failure. */
@@ -302,6 +361,7 @@ export class PostgresStore implements Store {
     statements: readonly SqlStatement[],
   ): Promise<ReadonlyArray<readonly SqlRow[]>> {
     try {
+      await this.#ensureWarm();
       await this.#ensureSchema();
       return await this.#withDeadline(async (signal) => {
         const [only, ...rest] = statements;
@@ -310,6 +370,8 @@ export class PostgresStore implements Store {
         return this.#executor.transaction(statements, signal);
       });
     } catch (error) {
+      // A failed warm-up was logged once, by the warm-up itself, for every caller sharing it.
+      if (error instanceof ApiError) throw error;
       this.#failures.record(command, error, failureKind(error));
       throw storageFailed();
     }
