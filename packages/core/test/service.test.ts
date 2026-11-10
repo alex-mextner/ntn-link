@@ -1,0 +1,444 @@
+import { beforeEach, describe, expect, test } from 'bun:test';
+import { API_LIMITS } from '../src/api-types';
+import { ApiError } from '../src/errors';
+import { enforceRateLimit, RATE_LIMITS } from '../src/rate-limit';
+import { claim, failureCode, harness, id, pageUrl, type Harness } from './helpers';
+
+let h: Harness;
+let key: string;
+beforeEach(async () => {
+  h = harness();
+  h.notion.add(id(1), {
+    workspace: 'thsm',
+    title: 'Наши с Леночкой Путешествия',
+    description: 'Лето 2026',
+  });
+  h.notion.add(id(2), { workspace: 'thsm', title: 'Наши с Леночкой Путешествия' });
+  h.notion.add(id(3), { workspace: 'other', title: 'Foreign' });
+  key = await claim(h, 'thsm', 1);
+});
+
+describe('creating links', () => {
+  test('without a key an unclaimed namespace needs a claim, a claimed one needs a rotate', async () => {
+    try {
+      await h.service.createLink({ url: pageUrl('other', 3) }, null);
+      throw new Error('expected failure');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect(e).toMatchObject({ code: 'needs_verification', action: 'claim', status: 403 });
+    }
+    try {
+      await h.service.createLink({ url: pageUrl('thsm', 1) }, 'ntnk_wrong');
+      throw new Error('expected failure');
+    } catch (e) {
+      expect(e).toMatchObject({ code: 'needs_verification', action: 'rotate' });
+    }
+  });
+
+  test('a key of another namespace is not accepted', async () => {
+    const otherKey = await claim(h, 'other', 3);
+    expect(await failureCode(h.service.createLink({ url: pageUrl('thsm', 1) }, otherKey))).toBe(
+      'needs_verification',
+    );
+  });
+
+  test('derives a transliterated slug, returns both links and suffixes on collision', async () => {
+    const first = await h.service.createLink({ url: pageUrl('thsm', 1) }, key);
+    expect(first.link.slug).toBe('nashi-s-lenochkoy-puteshestviya');
+    expect(first.link.redirectUrl).toBe('https://ntn.test/thsm/nashi-s-lenochkoy-puteshestviya');
+    expect(first.link.fastUrl).toBe('https://ntn.test/thsm/nashi-s-lenochkoy-puteshestviya/read');
+    const second = await h.service.createLink({ url: pageUrl('thsm', 2) }, key);
+    expect(second.link.slug).toBe('nashi-s-lenochkoy-puteshestviya-2');
+  });
+
+  test('explicit slugs: taken, reserved and malformed are typed errors, nothing is rewritten', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'trips' }, key);
+    expect(
+      await failureCode(h.service.createLink({ url: pageUrl('thsm', 2), slug: 'trips' }, key)),
+    ).toBe('slug_taken');
+    expect(
+      await failureCode(h.service.createLink({ url: pageUrl('thsm', 2), slug: 'api' }, key)),
+    ).toBe('slug_reserved');
+    expect(
+      await failureCode(h.service.createLink({ url: pageUrl('thsm', 2), slug: 'Bad Slug' }, key)),
+    ).toBe('slug_invalid');
+  });
+
+  test('concurrent creates of one slug: exactly one wins', async () => {
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, () =>
+        h.service.createLink({ url: pageUrl('thsm', 1), slug: 'same' }, key),
+      ),
+    );
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+  });
+
+  test('the same slug may exist in different namespaces', async () => {
+    const otherKey = await claim(h, 'other', 3);
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'home' }, key);
+    expect(
+      (await h.service.createLink({ url: pageUrl('other', 3), slug: 'home' }, otherKey)).link
+        .workspace,
+    ).toBe('other');
+  });
+
+  test('private pages are refused with not_public', async () => {
+    expect(await failureCode(h.service.createLink({ url: pageUrl('thsm', 404) }, key))).toBe(
+      'not_public',
+    );
+  });
+
+  test('fast=false removes the fast link from the response', async () => {
+    const { link } = await h.service.createLink({ url: pageUrl('thsm', 1), fast: false }, key);
+    expect(link.fast).toBe(false);
+    expect(link.fastUrl).toBeNull();
+  });
+});
+
+describe('preview', () => {
+  test('returns the exact card, a free slug and the verification need', async () => {
+    const p = await h.service.preview({ url: `https://www.notion.so/thsm/${id(1)}` }, null);
+    expect(p).toMatchObject({
+      workspace: 'thsm',
+      canonicalUrl: pageUrl('thsm', 1),
+      card: { title: 'Наши с Леночкой Путешествия', language: 'ru' },
+      proposedSlug: 'nashi-s-lenochkoy-puteshestviya',
+      namespaceClaimed: true,
+      needsVerification: true,
+      suggestedAction: 'rotate',
+    });
+    const owned = await h.service.preview({ url: pageUrl('thsm', 1) }, key);
+    expect(owned.needsVerification).toBe(false);
+    expect(owned.suggestedAction).toBeNull();
+  });
+
+  test('proposes the next free slug and stores nothing', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1) }, key);
+    const p = await h.service.preview({ url: pageUrl('thsm', 2) }, key);
+    expect(p.proposedSlug).toBe('nashi-s-lenochkoy-puteshestviya-2');
+    expect((await h.service.listLinks('thsm', key)).links).toHaveLength(1);
+  });
+});
+
+describe('updating and deleting', () => {
+  test('moving a slug frees the old one and purges both', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'old' }, key);
+    h.purged.length = 0;
+    const { link } = await h.service.updateLink('thsm', 'old', { slug: 'renamed' }, key);
+    expect(link.slug).toBe('renamed');
+    expect(await h.service.redirectPage('thsm', 'old')).toEqual({ kind: 'not_found' });
+    expect((await h.service.redirectPage('thsm', 'renamed')).kind).toBe('page');
+    expect(h.purged.toSorted()).toEqual(['thsm/old', 'thsm/renamed']);
+    expect((await h.service.listLinks('thsm', key)).links.map((l) => l.slug)).toEqual(['renamed']);
+  });
+
+  test('moving onto an existing slug fails and changes nothing', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'a' }, key);
+    await h.service.createLink({ url: pageUrl('thsm', 2), slug: 'b' }, key);
+    expect(await failureCode(h.service.updateLink('thsm', 'a', { slug: 'b' }, key))).toBe(
+      'slug_taken',
+    );
+    expect((await h.service.listLinks('thsm', key)).links).toHaveLength(2);
+  });
+
+  test('overrides win over fetched values and null removes them', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'a' }, key);
+    const set = await h.service.updateLink(
+      'thsm',
+      'a',
+      { overrides: { title: 'Custom' }, fast: false, canonicalMode: 'notion' },
+      key,
+    );
+    expect(set.link).toMatchObject({
+      card: { title: 'Custom', description: 'Лето 2026' },
+      fast: false,
+      canonicalMode: 'notion',
+    });
+    const cleared = await h.service.updateLink('thsm', 'a', { overrides: { title: null } }, key);
+    expect(cleared.link.card.title).toBe('Наши с Леночкой Путешествия');
+  });
+
+  test('only the namespace owner may mutate or list', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'a' }, key);
+    const otherKey = await claim(h, 'other', 3);
+    expect(await failureCode(h.service.updateLink('thsm', 'a', { fast: false }, otherKey))).toBe(
+      'unauthorized',
+    );
+    expect(
+      await failureCode(h.service.deleteLink('thsm', 'a', { kind: 'owner', ownerKey: null })),
+    ).toBe('unauthorized');
+    expect(await failureCode(h.service.listLinks('thsm', otherKey))).toBe('unauthorized');
+  });
+
+  test('delete by owner and by operator; the link disappears and the cache is purged', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'a' }, key);
+    await h.service.createLink({ url: pageUrl('thsm', 2), slug: 'b' }, key);
+    h.purged.length = 0;
+    await h.service.deleteLink('thsm', 'a', { kind: 'owner', ownerKey: key });
+    await h.service.deleteLink('thsm', 'b', { kind: 'operator' });
+    expect((await h.service.redirectPage('thsm', 'a')).kind).toBe('not_found');
+    expect((await h.service.listLinks('thsm', key)).links).toEqual([]);
+    expect(h.purged).toEqual(['thsm/a', 'thsm/b']);
+    expect(await failureCode(h.service.deleteLink('thsm', 'a', { kind: 'operator' }))).toBe(
+      'not_found',
+    );
+  });
+});
+
+describe('redirect page and lifecycle', () => {
+  test('serves OG HTML whose redirect target is rebuilt from workspace and id', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'trips' }, key);
+    const page = await h.service.redirectPage('thsm', 'trips');
+    if (page.kind !== 'page') throw new Error(page.kind);
+    expect(page.html).toContain('<meta property="og:title" content="Наши с Леночкой Путешествия">');
+    expect(page.html).toContain('content="0;url=https://thsm.notion.site/' + id(1) + '"');
+    expect(page.html).toContain('content="https://ntn.test/img/thsm/trips"');
+    expect(page.needsRefresh).toBe(false);
+  });
+
+  test('hostile Notion text is escaped in the served page', async () => {
+    h.notion.add(id(5), {
+      workspace: 'thsm',
+      title: '<script>alert(1)</script>',
+      description: '"><img src=x onerror=1>',
+    });
+    await h.service.createLink({ url: pageUrl('thsm', 5), slug: 'evil' }, key);
+    const page = await h.service.redirectPage('thsm', 'evil');
+    if (page.kind !== 'page') throw new Error(page.kind);
+    expect(page.html).not.toContain('<script>alert');
+    expect(page.html).not.toContain('<img src=x');
+  });
+
+  test('metadata is refreshed lazily after 24 h and follows renames; overrides still win', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'a' }, key);
+    await h.service.createLink(
+      { url: pageUrl('thsm', 2), slug: 'b', overrides: { title: 'Pinned' } },
+      key,
+    );
+    h.clock.advanceHours(25);
+    const stale = await h.service.redirectPage('thsm', 'a');
+    expect(stale).toMatchObject({ kind: 'page', needsRefresh: true });
+
+    const renamed = h.notion.pages.get(id(1));
+    if (renamed) renamed.title = 'Renamed page';
+    const pinned = h.notion.pages.get(id(2));
+    if (pinned) pinned.title = 'Renamed too';
+    await h.service.refreshLink('thsm', 'a');
+    await h.service.refreshLink('thsm', 'b');
+    const a = await h.service.redirectPage('thsm', 'a');
+    const b = await h.service.redirectPage('thsm', 'b');
+    if (a.kind !== 'page' || b.kind !== 'page') throw new Error('expected pages');
+    expect(a.html).toContain('content="Renamed page"');
+    expect(a.needsRefresh).toBe(false);
+    expect(b.html).toContain('content="Pinned"');
+  });
+
+  test('a page that stops being public becomes a 410 without redirect, and recovers when public again', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'a' }, key);
+    const saved = h.notion.pages.get(id(1));
+    h.notion.pages.delete(id(1));
+    await h.service.refreshLink('thsm', 'a');
+    const gone = await h.service.redirectPage('thsm', 'a');
+    expect(gone.kind).toBe('gone');
+    if (gone.kind === 'gone') expect(gone.html).not.toContain('refresh');
+    expect((await h.service.cardSource('thsm', 'a'))?.kind).toBe('generated');
+
+    if (saved) h.notion.add(id(1), saved);
+    // Just checked: no refresh yet. Once the card is stale the gone page asks for one.
+    expect(await h.service.redirectPage('thsm', 'a')).toMatchObject({
+      kind: 'gone',
+      needsRefresh: false,
+    });
+    h.clock.advanceHours(25);
+    const stale = await h.service.redirectPage('thsm', 'a');
+    expect(stale).toMatchObject({ kind: 'gone', needsRefresh: true });
+    await h.service.refreshLink('thsm', 'a');
+    expect((await h.service.redirectPage('thsm', 'a')).kind).toBe('page');
+  });
+
+  test('a Notion outage during refresh keeps serving the stored card', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'a' }, key);
+    h.notion.failing.add(id(1));
+    await h.service.refreshLink('thsm', 'a');
+    expect((await h.service.redirectPage('thsm', 'a')).kind).toBe('page');
+  });
+
+  test('unknown links are not_found', async () => {
+    expect(await h.service.redirectPage('thsm', 'missing')).toEqual({ kind: 'not_found' });
+    expect(await h.service.cardSource('thsm', 'missing')).toBeNull();
+  });
+});
+
+describe('card source', () => {
+  test('uses the freshly resolved Notion image at width 1200, or a generated card without one', async () => {
+    h.notion.add(id(6), {
+      workspace: 'thsm',
+      title: 'With image',
+      imageUrl: 'https://thsm.notion.site/image/x?table=block&width=2000',
+    });
+    await h.service.createLink({ url: pageUrl('thsm', 6), slug: 'withimage' }, key);
+    await h.service.createLink({ url: pageUrl('thsm', 2), slug: 'noimg' }, key);
+    expect(await h.service.cardSource('thsm', 'withimage')).toMatchObject({
+      kind: 'notion-image',
+      url: 'https://thsm.notion.site/image/x?table=block&width=1200',
+    });
+    expect(await h.service.cardSource('thsm', 'noimg')).toMatchObject({
+      kind: 'generated',
+      title: 'Наши с Леночкой Путешествия',
+    });
+  });
+
+  test('an unpublished or relocated page never serves its stored image', async () => {
+    const page = {
+      workspace: 'thsm',
+      title: 'With image',
+      imageUrl: 'https://thsm.notion.site/image/x?table=block&width=2000',
+    };
+    h.notion.add(id(6), page);
+    await h.service.createLink({ url: pageUrl('thsm', 6), slug: 'withimage' }, key);
+
+    h.notion.pages.delete(id(6));
+    expect((await h.service.cardSource('thsm', 'withimage'))?.kind).toBe('generated');
+
+    h.notion.add(id(6), { ...page, workspace: 'other' });
+    expect((await h.service.cardSource('thsm', 'withimage'))?.kind).toBe('generated');
+  });
+
+  test('a transient Notion failure keeps serving the stored image', async () => {
+    h.notion.add(id(6), {
+      workspace: 'thsm',
+      title: 'With image',
+      imageUrl: 'https://thsm.notion.site/image/x?table=block&width=2000',
+    });
+    await h.service.createLink({ url: pageUrl('thsm', 6), slug: 'withimage' }, key);
+    h.notion.failing.add(id(6));
+    expect((await h.service.cardSource('thsm', 'withimage'))?.kind).toBe('notion-image');
+  });
+});
+
+describe('rate limiting', () => {
+  test('blocks the request after the limit within a window and recovers in the next', async () => {
+    const { limit, windowSeconds } = RATE_LIMITS.challenge;
+    for (let i = 0; i < limit; i++)
+      await enforceRateLimit(h.store, 'challenge', '203.0.113.7', h.clock.ms);
+    try {
+      await enforceRateLimit(h.store, 'challenge', '203.0.113.7', h.clock.ms);
+      throw new Error('expected rate limit');
+    } catch (e) {
+      expect(e).toMatchObject({ code: 'rate_limited', status: 429 });
+      expect((e as ApiError).retryAfterSeconds).toBeGreaterThan(0);
+    }
+    // Other IPs are unaffected.
+    await enforceRateLimit(h.store, 'challenge', '203.0.113.8', h.clock.ms);
+    h.clock.advanceMinutes(windowSeconds / 60 + 1);
+    await enforceRateLimit(h.store, 'challenge', '203.0.113.7', h.clock.ms);
+  });
+
+  test('no raw IP address is stored in counter keys', async () => {
+    await enforceRateLimit(h.store, 'preview', '203.0.113.7', h.clock.ms);
+    expect(await h.store.get('rl:preview:203.0.113.7')).toBeNull();
+  });
+});
+
+describe('concurrent changes', () => {
+  test('a PATCH that races an operator delete does not bring the link back', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'a' }, key);
+    const compareAndSet = h.store.compareAndSet.bind(h.store);
+    let raced = false;
+    h.store.compareAndSet = async (k, expected, value) => {
+      if (!raced) {
+        raced = true;
+        await h.service.deleteLink('thsm', 'a', { kind: 'operator' });
+      }
+      return compareAndSet(k, expected, value);
+    };
+
+    expect(await failureCode(h.service.updateLink('thsm', 'a', { fast: false }, key))).toBe(
+      'not_found',
+    );
+    expect(await h.service.getLink('thsm', 'a')).toBeNull();
+    expect((await h.service.listLinks('thsm', key)).links).toEqual([]);
+  });
+
+  test('a refresh that outlives its link never writes into a replacement', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'a' }, key);
+    const renamed = h.notion.pages.get(id(1));
+    if (renamed) renamed.title = 'Renamed while refreshing';
+    const fetchPage = h.notion.fetchPage.bind(h.notion);
+    let swapped = false;
+    h.notion.fetchPage = async (request) => {
+      const result = await fetchPage(request);
+      if (!swapped) {
+        swapped = true;
+        await h.service.deleteLink('thsm', 'a', { kind: 'operator' });
+        await h.service.createLink({ url: pageUrl('thsm', 2), slug: 'a' }, key);
+      }
+      return result;
+    };
+
+    await h.service.refreshLink('thsm', 'a');
+
+    expect(await h.service.getLink('thsm', 'a')).toMatchObject({
+      pageId: id(2),
+      title: 'Наши с Леночкой Путешествия',
+    });
+  });
+
+  test('concurrent creates cannot exceed the namespace link limit', async () => {
+    const limit = API_LIMITS.linksPerNamespace;
+    for (let n = 0; n < limit - 1; n++) {
+      await h.service.createLink({ url: pageUrl('thsm', 1), slug: `s-${n}` }, key);
+    }
+    // Hold both creates at the storage call so both are admitted by the cap at the same time.
+    const createIndexed = h.store.createIndexed.bind(h.store);
+    const bothArrived = Promise.withResolvers<void>();
+    let arrived = 0;
+    h.store.createIndexed = async (...args) => {
+      if (++arrived <= 2) {
+        if (arrived === 2) bothArrived.resolve();
+        await bothArrived.promise;
+      }
+      return createIndexed(...args);
+    };
+
+    const results = await Promise.allSettled([
+      h.service.createLink({ url: pageUrl('thsm', 1), slug: 'last-a' }, key),
+      h.service.createLink({ url: pageUrl('thsm', 1), slug: 'last-b' }, key),
+    ]);
+
+    expect((await h.store.setMembers('nslinks:thsm')).length).toBe(limit);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const failed = results.find((r) => r.status === 'rejected');
+    expect(failed).toMatchObject({ reason: { code: 'link_limit' } });
+  });
+
+  test('a rename that races a delete-and-recreate removes nothing and resurrects nothing', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'a' }, key);
+    const moveIndexed = h.store.moveIndexed.bind(h.store);
+    let raced = false;
+    h.store.moveIndexed = async (move) => {
+      if (!raced) {
+        raced = true;
+        await h.service.deleteLink('thsm', 'a', { kind: 'operator' });
+        await h.service.createLink({ url: pageUrl('thsm', 2), slug: 'a' }, key);
+      }
+      return moveIndexed(move);
+    };
+
+    expect(await failureCode(h.service.updateLink('thsm', 'a', { slug: 'b' }, key))).toBe(
+      'not_found',
+    );
+
+    expect(await h.service.getLink('thsm', 'b')).toBeNull();
+    expect(await h.service.getLink('thsm', 'a')).toMatchObject({ pageId: id(2) });
+    const slugs = (await h.service.listLinks('thsm', key)).links.map((l) => l.slug);
+    expect(slugs).toEqual(['a']);
+  });
+
+  test('a link deleted and recreated under the same slug stays in the namespace index', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'a' }, key);
+    await h.service.deleteLink('thsm', 'a', { kind: 'operator' });
+    await h.service.createLink({ url: pageUrl('thsm', 2), slug: 'a' }, key);
+    expect((await h.service.listLinks('thsm', key)).links.map((l) => l.pageId)).toEqual([id(2)]);
+  });
+});

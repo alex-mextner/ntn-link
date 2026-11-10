@@ -162,6 +162,11 @@ export interface VerifyResponse {
   ownerKey: string;
   /** Rotation only: number of links removed because their target is no longer public. */
   removedLinks: number;
+  /**
+   * False when the post-rotation sweep stopped early (storage trouble). The new key is valid
+   * regardless; the sweep is idempotent and can be re-run with that key.
+   */
+  cleanupComplete: boolean;
 }
 
 export interface CreateLinkRequest {
