@@ -15,6 +15,7 @@ import type {
   UpdateLinkResponse,
   VerifyResponse,
 } from '../../../../packages/core/src/api-types';
+import { DeadlineError, raceDeadline, REQUEST_TIMEOUT_MS, WRITE_TIMEOUT_MS } from './deadline';
 import { ApiCallError, errorFromBody } from './errors';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -43,10 +44,11 @@ export interface Api {
 }
 
 export function createApi(fetchImpl: FetchLike): Api {
-  async function call<T>(
+  async function exchange<T>(
     method: string,
     path: string,
-    options: { body?: object; ownerKey?: string | null; signal?: AbortSignal } = {},
+    options: { body?: object; ownerKey?: string | null },
+    signal: AbortSignal,
   ): Promise<T> {
     const headers: Record<string, string> = { accept: 'application/json' };
     if (options.body) headers['content-type'] = 'application/json';
@@ -57,7 +59,7 @@ export function createApi(fetchImpl: FetchLike): Api {
         method,
         headers,
         body: options.body ? JSON.stringify(options.body) : undefined,
-        signal: options.signal,
+        signal,
         cache: 'no-store',
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
@@ -78,23 +80,59 @@ export function createApi(fetchImpl: FetchLike): Api {
     return parsed as T;
   }
 
+  /**
+   * One request with a deadline: a hung server ends in a retryable 'timeout', never a stuck
+   * spinner. `write` calls change server state and may legitimately run as long as the route
+   * (60 s: verify with a rotation sweep, create behind a cold database), so they wait longer
+   * than the server does: giving up earlier would lose an answer the server still produces,
+   * such as the new owner key, which is shown once.
+   */
+  async function call<T>(
+    method: string,
+    path: string,
+    options: { body?: object; ownerKey?: string | null; signal?: AbortSignal; write?: true } = {},
+  ): Promise<T> {
+    const deadline = new AbortController();
+    // Not AbortSignal.any (Safari 17.4+): the caller's abort is forwarded by hand.
+    const callerSignal = options.signal;
+    const forwardAbort = () => deadline.abort(callerSignal?.reason);
+    if (callerSignal?.aborted) forwardAbort();
+    else callerSignal?.addEventListener('abort', forwardAbort, { once: true });
+    try {
+      return await raceDeadline(
+        exchange<T>(method, path, options, deadline.signal),
+        options.write ? WRITE_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+      );
+    } catch (error) {
+      if (!(error instanceof DeadlineError)) throw error;
+      deadline.abort();
+      throw new ApiCallError('timeout', 0);
+    } finally {
+      callerSignal?.removeEventListener('abort', forwardAbort);
+    }
+  }
+
   const seg = encodeURIComponent;
   return {
     preview: (url, ownerKey, signal) =>
       call('POST', '/api/preview', { body: { url }, ownerKey, signal }),
-    challenge: (url, action) => call('POST', '/api/challenge', { body: { url, action } }),
+    challenge: (url, action) =>
+      call('POST', '/api/challenge', { body: { url, action }, write: true }),
     verify: (url, nonce, claimToken) =>
-      call('POST', '/api/verify', { body: { url, nonce, claimToken } }),
-    createLink: (body, ownerKey) => call('POST', '/api/links', { body, ownerKey }),
+      call('POST', '/api/verify', { body: { url, nonce, claimToken }, write: true }),
+    createLink: (body, ownerKey) => call('POST', '/api/links', { body, ownerKey, write: true }),
     updateLink: (workspace, slug, body, ownerKey) =>
-      call('PATCH', `/api/links/${seg(workspace)}/${seg(slug)}`, { body, ownerKey }),
+      call('PATCH', `/api/links/${seg(workspace)}/${seg(slug)}`, { body, ownerKey, write: true }),
     deleteLink: (workspace, slug, ownerKey) =>
-      call('DELETE', `/api/links/${seg(workspace)}/${seg(slug)}`, { ownerKey }),
+      call('DELETE', `/api/links/${seg(workspace)}/${seg(slug)}`, { ownerKey, write: true }),
     listLinks: (workspace, ownerKey) =>
       call('GET', `/api/ns/${seg(workspace)}/links`, { ownerKey }),
     async sweep(workspace, ownerKey) {
       try {
-        return await call<SweepResponse>('POST', `/api/ns/${seg(workspace)}/sweep`, { ownerKey });
+        return await call<SweepResponse>('POST', `/api/ns/${seg(workspace)}/sweep`, {
+          ownerKey,
+          write: true,
+        });
       } catch (error) {
         // An unrouted path answers a bare 404/405 (no typed body) => feature not deployed.
         if (
