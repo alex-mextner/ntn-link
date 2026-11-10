@@ -5,7 +5,7 @@
  * docs/fast-variant.md: `article > header > h1 + time`, then the body blocks, then
  * `footer > a.orig`. Change one only together with the other.
  */
-import { escapeHtml, FAVICON_LINK } from '../og-html';
+import { emojiFaviconLink, escapeHtml, FAVICON_LINK } from '../og-html';
 import { ogLocale } from '../metadata';
 import { CRITICAL_CSS } from './css';
 import { articleJsonLd } from './jsonld';
@@ -123,7 +123,7 @@ export function renderFastPage(input: FastPageInput): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
-${FAVICON_LINK}
+${input.hero.icon?.kind === 'emoji' ? emojiFaviconLink(input.hero.icon.text) : FAVICON_LINK}
 ${metaTags(input, selfUrl)}
 <script type="application/ld+json">${articleJsonLd(input, selfUrl)}</script>
 <style>${CRITICAL_CSS}</style>

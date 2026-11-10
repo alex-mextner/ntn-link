@@ -91,6 +91,14 @@ Covers and uploaded icons go through the same image proxy as image blocks
 (`/img/content/<ws>/<slug>/<pageId>?k=cover|icon`, only for the link's own root page). The CSS
 budget is 10 KB (it was 3 KB for the plain layout), asserted in `test/render/page.test.ts`.
 
+An emoji icon (page hero, callouts, sub-page links) is text. The hero names Apple Color Emoji
+first in its font stack, the others fall back to the platform's emoji font, so Apple devices
+draw Apple's own glyphs without us shipping any artwork. The page's own emoji is also the tab
+icon (an inline SVG data URI holding the emoji, no request). Other platforms show their own
+emoji font there: a picture per emoji would be an extra request per emoji on a page whose
+budget is one. The generated card image (`/img/<ws>/<slug>`) is a PNG and cannot use Apple's
+artwork (proprietary, no redistribution grant): it draws Twemoji (design spec 5.2, "Licensing").
+
 Not rendered like Notion (they stay "Open in Notion" links or plain text): syntax highlighting in
 code blocks, equations, embeds and video, files and PDFs, synced blocks, inline databases
 (`collection_view`), external object mentions, bookmark thumbnails, the top bar.

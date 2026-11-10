@@ -9,6 +9,7 @@ const base = {
   pageUrl: 'https://ntn.link/thsm/our-trips',
   targetUrl: 'https://thsm.notion.site/413d447ac4b180169985c93eea7f02f9',
   language: 'ru',
+  emoji: null,
 };
 
 describe('renderRedirectHtml', () => {
@@ -58,6 +59,31 @@ describe('renderRedirectHtml', () => {
     expect(out.match(/<\/script>/g)).toHaveLength(1);
     const scriptLine = out.split('\n').find((l) => l.startsWith('<script>')) ?? '';
     expect(scriptLine).not.toContain('\u2028');
+  });
+});
+
+describe('redirect page icon', () => {
+  const iconed = renderRedirectHtml({ ...base, emoji: '🤿' });
+
+  test('an emoji icon replaces the ntn.link mark and becomes the tab icon', () => {
+    expect(iconed).toContain('<span class="m e" aria-hidden="true">🤿</span>');
+    expect(iconed).not.toContain('<svg width="24"');
+    const favicon = /<link rel="icon" href="data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)">/.exec(
+      iconed,
+    )?.[1];
+    expect(Buffer.from(favicon ?? '', 'base64').toString('utf8')).toContain('>🤿</text>');
+  });
+
+  test('no icon keeps the ntn.link mark and adds no favicon', () => {
+    const plain = renderRedirectHtml(base);
+    expect(plain).toContain('<svg width="24"');
+    expect(plain).not.toContain('rel="icon"');
+  });
+
+  test('the emoji is escaped', () => {
+    const out = renderRedirectHtml({ ...base, emoji: '<img src=x onerror=alert(1)>' });
+    expect(out).not.toContain('<img src=x');
+    expect(out).toContain('&lt;img src=x');
   });
 });
 

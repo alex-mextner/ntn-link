@@ -102,6 +102,13 @@ export interface TextOverrides {
   description?: string;
 }
 
+/**
+ * The page's own icon as the generated card draws it: an emoji (the card draws a Twemoji
+ * picture for it, the web preview shows it as text) or an uploaded or linked picture, already fetched and downscaled, as a
+ * `data:image/png|jpeg;base64,...` URI so nothing about it can expire or leave our origin.
+ */
+export type CardIcon = { kind: 'emoji'; emoji: string } | { kind: 'image'; dataUri: string };
+
 /** Card data exactly as an unfurler would see it. */
 export interface CardData {
   /** Title without the trailing " | Notion". */
@@ -128,6 +135,12 @@ export interface PreviewResponse {
    * them under the title. Empty when the page has its own image or no text.
    */
   excerpt: string[];
+  /**
+   * The page's icon, drawn big next to the title on the generated card. Null when the page has
+   * none, when it has its own image (no generated card), or when Notion's icon is not a
+   * picture we may fetch.
+   */
+  icon: CardIcon | null;
   /** Free slug proposed from the title. */
   proposedSlug: string;
   /** True when the namespace is unclaimed. */
