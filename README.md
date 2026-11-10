@@ -83,6 +83,23 @@ Public routes:
 Link changes purge the CDN by cache tag on Vercel (`dangerouslyDeleteByTag`) and revalidate the
 `/read` path; elsewhere the purge is a no-op.
 
+### Cards that change, and preview caches of messengers
+
+The `og:image` of a link (and of its `/read` copy) is `/img/<ws>/<slug>?v=<version>`. The version
+is a short digest of the card render version (`CARD_RENDER_VERSION` in
+`packages/core/src/card-version.ts`, bumped whenever the look of the card changes), the effective
+title and description, the cover, and, for a page without a cover, a digest of the opening text
+drawn on its card (stored on create and on every refresh). A changed card therefore gets a new
+image URL: crawlers that read the page again fetch the new image instead of reusing one cached
+under the old URL, and the CDN keeps one entry per version. `?v=` is ignored by the route itself.
+
+Telegram, Slack, Facebook and others keep their own preview of an already shared URL. That
+cache cannot be cleared from this service: a link shared before a card change keeps its old
+preview until the messenger decides to read the page again. For Telegram, send the link to
+[@WebpageBot](https://t.me/WebpageBot) to make it re-read the page; messages posted afterwards
+show the refreshed preview, messages already posted keep what they showed. Creating a second
+link (another slug) to the same page always starts with a clean preview.
+
 ## The `NTN_TEST_FETCHER` caveat
 
 Verification demands that a public Notion page of the workspace shows the nonce in its title. To

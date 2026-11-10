@@ -54,6 +54,13 @@ export const linkRecordSchema = z.object({
    * target is still public here; lets repeated, time-bounded sweeps converge. Absent until swept.
    */
   sweptVersion: z.string().nullable().optional(),
+  /**
+   * Short digest of the page text drawn on the generated card (the card of a page without a
+   * cover), taken when the link was created or last refreshed; part of the card image version
+   * so an edit of the page's opening text gives the card a new image URL. Null for a page with
+   * a cover; absent on records written before this field existed.
+   */
+  excerptDigest: z.string().nullable().optional(),
   /** Failed sweep fetches of this link for `version`; links with fewer failures are retried first. */
   sweepTried: z.object({ version: z.string(), count: z.number() }).nullable().optional(),
 });

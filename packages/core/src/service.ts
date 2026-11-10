@@ -21,6 +21,8 @@ import type {
 } from './api-types';
 import { API_LIMITS } from './api-types';
 import { TtlCache } from './card-cache';
+import { cardImageUrl } from './card-version';
+import { sha256Hex } from './crypto';
 import { ApiError } from './errors';
 import { withImageWidth } from './metadata';
 import type { PageFetcher, PageFetchResult } from './notion-fetcher';
@@ -162,7 +164,12 @@ function applyUpdate(current: LinkRecord, request: UpdateLinkRequest): LinkRecor
   };
 }
 
-function applyFetchResult(latest: LinkRecord, result: PageFetchResult, nowIso: string): LinkRecord {
+function applyFetchResult(
+  latest: LinkRecord,
+  result: PageFetchResult,
+  nowIso: string,
+  excerptDigest: string | null,
+): LinkRecord {
   if (result.kind === 'not_public' || result.workspace !== latest.workspace) {
     return { ...latest, goneAt: latest.goneAt ?? nowIso, fetchedAt: nowIso };
   }
@@ -172,6 +179,7 @@ function applyFetchResult(latest: LinkRecord, result: PageFetchResult, nowIso: s
     description: result.metadata.description,
     imageUrl: result.metadata.imageUrl,
     language: result.metadata.language,
+    excerptDigest,
     fetchedAt: nowIso,
     goneAt: null,
   };
@@ -207,6 +215,21 @@ export function createService(deps: ServiceDeps): Service {
     maxEntries: CARD_CACHE_ENTRIES,
     now: () => now().getTime(),
   });
+  /**
+   * What to store as `excerptDigest`: null for a page with its own cover (no text is drawn),
+   * the digest of the card's opening text otherwise. A page whose text was deleted digests the
+   * empty text, so the card gets a new image URL; a failed read looks the same (the image
+   * route draws the same text-less card then), which at worst costs one extra card version.
+   */
+  const cardTextDigest = async (
+    workspace: string,
+    pageId: string,
+    imageUrl: string | null,
+  ): Promise<string | null> => {
+    if (imageUrl !== null && !isNotionPlaceholderImageUrl(imageUrl)) return null;
+    const lines = await loadExcerpt(workspace, pageId);
+    return (await sha256Hex(lines.join('\n'))).slice(0, 10);
+  };
   const purge = async (workspace: string, slug: string): Promise<void> => {
     cardImages.delete(`${workspace}/${slug}`);
     await purgeEdge(workspace, slug);
@@ -392,6 +415,7 @@ export function createService(deps: ServiceDeps): Service {
         );
       }
       const meta = page.metadata;
+      const excerptDigest = await cardTextDigest(page.workspace, page.pageId, meta.imageUrl);
       const create = async (): Promise<CreateLinkOutcome> => {
         const overrides = request.overrides ?? {};
         const nowIso = now().toISOString();
@@ -404,6 +428,7 @@ export function createService(deps: ServiceDeps): Service {
             description: meta.description,
             imageUrl: meta.imageUrl,
             language: meta.language,
+            excerptDigest,
             fetchedAt: nowIso,
             createdAt: nowIso,
             overrides,
@@ -424,7 +449,9 @@ export function createService(deps: ServiceDeps): Service {
         // The page is public again (just fetched), so the returned link must serve it again.
         const nowIso = now().toISOString();
         const revived = await repo.updateLink(existing.workspace, existing.slug, (latest) =>
-          latest.pageId === page.pageId ? applyFetchResult(latest, page, nowIso) : latest,
+          latest.pageId === page.pageId
+            ? applyFetchResult(latest, page, nowIso, excerptDigest)
+            : latest,
         );
         await purge(existing.workspace, existing.slug);
         return { link: view(revived ?? existing), created: false };
@@ -480,7 +507,7 @@ export function createService(deps: ServiceDeps): Service {
       const html = renderRedirectHtml({
         title: card.title,
         description: card.description,
-        imageUrl: `${deps.origin}/img/${workspace}/${slug}`,
+        imageUrl: await cardImageUrl(deps.origin, record),
         pageUrl: redirectUrl(workspace, slug),
         // Rebuilt from validated parts, never taken from stored free text.
         targetUrl: canonicalNotionUrl(record.workspace, record.pageId),
@@ -509,9 +536,13 @@ export function createService(deps: ServiceDeps): Service {
       const result = await fetchFresh(record);
       if (result === null) return; // Transient Notion trouble: keep serving the stored card.
       const nowIso = now().toISOString();
+      const digest =
+        result.kind === 'public' && result.workspace === record.workspace
+          ? await cardTextDigest(record.workspace, record.pageId, result.metadata.imageUrl)
+          : null;
       const refreshed = await repo.updateLink(workspace, slug, (latest) =>
         // The slug may have been deleted and reused for another page while Notion answered.
-        latest.pageId === record.pageId ? applyFetchResult(latest, result, nowIso) : latest,
+        latest.pageId === record.pageId ? applyFetchResult(latest, result, nowIso, digest) : latest,
       );
       if (refreshed !== null) await purge(workspace, slug);
     },
