@@ -15,12 +15,14 @@ export interface Harness {
   stdout: string[];
   stderr: string[];
   copied: string[];
+  /** Delays the CLI asked to sleep (the harness never actually waits). */
+  sleeps: number[];
   /**
    * Answers a CLI prompt. Default behaviour mimics a user who follows the instructions: puts every
    * nonce shown so far into the title of `codePage` (default: the linked page), and removes them
    * again when asked to clean the title.
    */
-  onAsk: (question: string, stderrSoFar: string) => string;
+  onAsk: (question: string, stderrSoFar: string) => string | Promise<string>;
   /** Page the user puts the code on; defaults to the first argument of exec(). */
   codePage: string | undefined;
   clipboardWorks: boolean;
@@ -43,6 +45,7 @@ export function makeHarness(): Harness {
     stdout: [],
     stderr: [],
     copied: [],
+    sleeps: [],
     clipboardWorks: true,
     isTTY: true,
     ioOverrides: {},
@@ -71,6 +74,7 @@ export function makeHarness(): Harness {
           if (h.clipboardWorks) h.copied.push(text);
           return h.clipboardWorks;
         },
+        sleep: async (ms) => void h.sleeps.push(ms),
         ...h.ioOverrides,
       };
       return run(argv, io);

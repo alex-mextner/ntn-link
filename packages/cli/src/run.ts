@@ -6,10 +6,11 @@
 import pkg from '../package.json';
 import { ApiFailure, NetworkFailure, createApi } from './api';
 import { type Command, UsageError, parseArgs } from './args';
-import { create, list, remove, update } from './commands';
+import { create, list, remove, sweep, update } from './commands';
 import { type Ctx, type Io, say } from './ctx';
 import { EXIT, Fail, exitCodeFor, plainText } from './errors';
 import { openKeyStore } from './keys';
+import { LockTimeout } from './lock';
 import { type RunLog, openRunLog } from './log';
 import { ConfigError, keysFilePath } from './paths';
 
@@ -21,11 +22,16 @@ Usage:
   ntn-link <notion-url> [--slug name] [--fast] [--copy] [--origin URL]
   ntn-link ls <workspace>
   ntn-link rm <workspace>/<slug>
+  ntn-link sweep <workspace>
   ntn-link set <workspace>/<slug> [--title T] [--description D] [--slug S]
                                   [--fast on|off] [--canonical self|notion]
 
 Prints only the short link on stdout (the fast /read link with --fast).
 An empty --title or --description removes that override.
+sweep finishes the removal of links to pages that are no longer public after a key
+rotation (it repeats until the service reports it is done); it prints nothing on stdout.
+Exit codes: 0 ok, 2 usage, 3 needs a terminal, 4 config, 5 bad page, 6 slug, 7 not authorized,
+8 rate limited, 9 challenge failed, 10 network, 11 sweep unfinished, 12 sweep unsupported, 1 other.
 Environment: NTN_LINK_ORIGIN (service origin), XDG_CONFIG_HOME (key file location).
 `;
 
@@ -42,16 +48,18 @@ function describeFailure(error: unknown): { message: string; exit: number } {
   }
   if (error instanceof NetworkFailure) return { message: error.message, exit: EXIT.network };
   if (error instanceof ConfigError) return { message: error.message, exit: EXIT.config };
+  if (error instanceof LockTimeout) return { message: error.message, exit: EXIT.failure };
   const detail = error instanceof Error ? error.message : String(error);
   return { message: `unexpected error: ${detail}`, exit: EXIT.failure };
 }
 
-const EXPECTED_FAILURES = [Fail, ApiFailure, NetworkFailure, ConfigError];
+const EXPECTED_FAILURES = [Fail, ApiFailure, NetworkFailure, ConfigError, LockTimeout];
 
 async function dispatch(ctx: Ctx, command: Command): Promise<void> {
   if (command.kind === 'create') await create(ctx, command);
   else if (command.kind === 'ls') await list(ctx, command.ws);
   else if (command.kind === 'rm') await remove(ctx, command.target);
+  else if (command.kind === 'sweep') await sweep(ctx, command.ws);
   else if (command.kind === 'set') await update(ctx, command);
 }
 

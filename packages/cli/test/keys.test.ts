@@ -9,11 +9,13 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openKeyStore } from '../src/keys';
+import { LockTimeout, withLock, withLockAsync } from '../src/lock';
 
 const O = 'https://svc.test';
 let dir = '';
@@ -98,12 +100,276 @@ test('concurrent processes saving different workspaces do not lose each other', 
   expect(readdirSync(cfg).toSorted()).toEqual(['keys.json']);
 });
 
-test('a lock held by another run fails after the bounded wait and names what to delete', () => {
-  mkdirSync(join(cfg, 'keys.lock'), { recursive: true });
+const lockFile = (): string => join(cfg, 'keys.lock');
+
+/** A pid that certainly belongs to no running process. */
+async function deadPid(): Promise<number> {
+  const proc = Bun.spawn(['true']);
+  await proc.exited;
+  return proc.pid;
+}
+
+function plantLock(holder: { pid: number; host?: string; ts?: number; start?: string }): void {
+  mkdirSync(cfg, { recursive: true });
+  writeFileSync(
+    lockFile(),
+    JSON.stringify({ host: hostname(), ts: Date.now(), start: null, token: 'planted', ...holder }),
+  );
+}
+
+test('a lock held by a live run fails after the bounded wait and names what to delete', () => {
+  plantLock({ pid: process.pid });
   const started = Date.now();
-  expect(() => openKeyStore(path, 200).set(O, 'a', 'k')).toThrow(/delete .*keys\.lock/);
+  expect(() => openKeyStore(path, { lockWaitMs: 200 }).set(O, 'a', 'k')).toThrow(
+    /delete .*keys\.lock/,
+  );
   expect(Date.now() - started).toBeLessThan(2000);
-  expect(existsSync(join(cfg, 'keys.lock'))).toBe(true); // never reclaimed behind the holder's back
+  expect(existsSync(lockFile())).toBe(true); // a live holder is never taken over
+});
+
+test('a lock left by a killed run (its pid is gone) is reclaimed at once', async () => {
+  plantLock({ pid: await deadPid() });
+  const store = openKeyStore(path, { lockWaitMs: 200 });
+  expect(store.set(O, 'a', 'k')).toBe(true);
+  expect(store.get(O, 'a')).toBe('k');
+  expect(readdirSync(cfg)).toEqual(['keys.json']); // lock and reclaim guard are gone
+});
+
+test('a lock from another host is only reclaimed once it is older than the bound', () => {
+  plantLock({ pid: process.pid, host: 'some-other-host', ts: Date.now() - 1000 });
+  expect(() =>
+    openKeyStore(path, { lockWaitMs: 100, lockStaleMs: 60_000 }).set(O, 'a', 'k'),
+  ).toThrow(/delete/);
+  plantLock({ pid: process.pid, host: 'some-other-host', ts: Date.now() - 120_000 });
+  expect(openKeyStore(path, { lockWaitMs: 100, lockStaleMs: 60_000 }).set(O, 'a', 'k')).toBe(true);
+});
+
+test('a live holder is never taken over, however old its lock (a paused writer keeps exclusion)', () => {
+  const stale = { staleAfterMs: 1 };
+  mkdirSync(cfg, { recursive: true });
+  withLock(lockFile(), 100, stale, () => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20); // far older than the bound
+    expect(() => withLock(lockFile(), 60, stale, () => undefined)).toThrow(LockTimeout);
+  });
+  plantLock({ pid: process.pid, ts: Date.now() - 3_600_000 });
+  expect(() =>
+    openKeyStore(path, { lockWaitMs: 100, lockStaleMs: 60_000 }).set(O, 'a', 'k'),
+  ).toThrow(/delete/);
+  expect(readFileSync(lockFile(), 'utf8')).toContain('planted');
+});
+
+test.skipIf(process.platform !== 'linux')(
+  'a lock whose pid was reused by another process (different start time) is reclaimed',
+  () => {
+    plantLock({ pid: process.pid, start: 'not-the-real-start-time' });
+    expect(openKeyStore(path, { lockWaitMs: 100 }).set(O, 'a', 'k')).toBe(true);
+    expect(readdirSync(cfg)).toEqual(['keys.json']);
+  },
+);
+
+test('a lock without readable content (the old empty directory) is judged by its age only', () => {
+  mkdirSync(lockFile(), { recursive: true });
+  expect(() =>
+    openKeyStore(path, { lockWaitMs: 100, lockStaleMs: 60_000 }).set(O, 'a', 'k'),
+  ).toThrow(/delete/);
+  const longAgo = new Date(Date.now() - 120_000);
+  utimesSync(lockFile(), longAgo, longAgo);
+  expect(openKeyStore(path, { lockWaitMs: 100, lockStaleMs: 60_000 }).set(O, 'a', 'k')).toBe(true);
+  expect(readdirSync(cfg)).toEqual(['keys.json']);
+});
+
+test('a holder that was reclaimed meanwhile does not delete its successor lock on release', () => {
+  mkdirSync(cfg, { recursive: true });
+  withLock(lockFile(), 100, { staleAfterMs: 60_000 }, () => {
+    // Someone judged us abandoned, reclaimed the lock and now holds it themselves.
+    rmSync(lockFile());
+    plantLock({ pid: process.pid });
+  });
+  expect(readFileSync(lockFile(), 'utf8')).toContain('planted');
+});
+
+test('a FIFO planted as the lock cannot stall the bounded wait', async () => {
+  mkdirSync(cfg, { recursive: true });
+  expect(Bun.spawnSync(['mkfifo', lockFile()]).exitCode).toBe(0);
+  const probe = Bun.spawn(['bun', join(import.meta.dir, 'lock-probe.ts'), path, '100'], {
+    stdout: 'pipe',
+    stderr: 'inherit',
+  });
+  const killer = setTimeout(() => probe.kill(), 4000);
+  const out = await new Response(probe.stdout).text();
+  clearTimeout(killer);
+  expect(probe.killed).toBe(false); // finished on its own
+  expect(out).toMatch(/delete .*keys\.lock/);
+});
+
+test('releasing waits for an in-flight reclaimer instead of racing it', async () => {
+  mkdirSync(cfg, { recursive: true });
+  const guard = `${lockFile()}.reclaim`;
+  const started = Date.now();
+  let helper: ReturnType<typeof Bun.spawn> | undefined;
+  await withLockAsync(lockFile(), 100, { staleAfterMs: 60_000 }, 'x', async () => {
+    writeFileSync(guard, ''); // a reclaimer is working on this lock path right now
+    // release() blocks this thread, so another process frees the guard after a moment.
+    helper = Bun.spawn(['sh', '-c', `sleep 0.3; rm -f '${guard}'`]);
+  });
+  expect(Date.now() - started).toBeGreaterThanOrEqual(250); // release was held back by the guard
+  expect(existsSync(lockFile())).toBe(false);
+  await helper?.exited;
+  expect(existsSync(guard)).toBe(false);
+});
+
+test('a reclaimer leaves the lock alone while another reclaimer or releaser holds the guard', async () => {
+  plantLock({ pid: await deadPid() });
+  writeFileSync(`${lockFile()}.reclaim`, ''); // fresh guard: someone else is acting on the lock
+  expect(() => openKeyStore(path, { lockWaitMs: 100 }).set(O, 'a', 'k')).toThrow(/delete/);
+  expect(readFileSync(lockFile(), 'utf8')).toContain('planted');
+});
+
+test('a creator suspended inside the empty-file window never enters a lock reclaimed meanwhile', () => {
+  mkdirSync(cfg, { recursive: true });
+  let entered = false;
+  let interfered = false;
+  const hooks = {
+    afterOpen: () => {
+      if (interfered) return;
+      interfered = true;
+      // While we are paused: the empty file is judged unreadable, reclaimed, and someone else holds the lock.
+      rmSync(lockFile());
+      plantLock({ pid: process.pid });
+    },
+  };
+  expect(() =>
+    withLock(lockFile(), 80, { staleAfterMs: 60_000, hooks }, () => void (entered = true)),
+  ).toThrow(LockTimeout);
+  expect(entered).toBe(false);
+  expect(readFileSync(lockFile(), 'utf8')).toContain('planted'); // the successor's lock is untouched
+});
+
+test('two reclaimers of one abandoned guard cannot delete the fresh guard that replaced it', async () => {
+  plantLock({ pid: await deadPid() }); // a lock to reclaim
+  const guard = `${lockFile()}.reclaim`;
+  writeFileSync(guard, ''); // abandoned guard of a dead reclaimer
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(guard, old, old);
+  let swapped = false;
+  const hooks = {
+    beforeGuardTakeover: () => {
+      if (swapped) return;
+      swapped = true;
+      // The other reclaimer finishes first and a new live guard exists when we move ours away.
+      rmSync(guard);
+      writeFileSync(
+        guard,
+        JSON.stringify({
+          pid: process.pid,
+          host: hostname(),
+          ts: Date.now(),
+          start: null,
+          token: 'fresh-guard',
+        }),
+      );
+    },
+  };
+  expect(() => withLock(lockFile(), 0, { staleAfterMs: 60_000, hooks }, () => undefined)).toThrow(
+    LockTimeout,
+  );
+  expect(readFileSync(guard, 'utf8')).toContain('fresh-guard'); // put back, not deleted
+  expect(readFileSync(lockFile(), 'utf8')).toContain('planted'); // nobody reclaimed under a guard they did not hold
+  expect(readdirSync(cfg).filter((f) => f.includes('.dead-'))).toEqual([]);
+});
+
+test('a stale reclaim guard left by a dead reclaimer does not block forever', async () => {
+  plantLock({ pid: await deadPid() });
+  writeFileSync(`${lockFile()}.reclaim`, '');
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(`${lockFile()}.reclaim`, old, old);
+  expect(openKeyStore(path, { lockWaitMs: 1000, lockStaleMs: 60_000 }).set(O, 'a', 'k')).toBe(true);
+  expect(readdirSync(cfg)).toEqual(['keys.json']);
+});
+
+test('workspace names that are Object.prototype keys roundtrip like any other', () => {
+  const store = openKeyStore(path);
+  for (const ws of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+    expect(store.get(O, ws)).toBeNull();
+    store.set(O, ws, `key-${ws}`);
+    expect(openKeyStore(path).get(O, ws)).toBe(`key-${ws}`);
+  }
+});
+
+test('flows of one workspace run one at a time, across store instances', async () => {
+  const order: string[] = [];
+  const first = openKeyStore(path);
+  const second = openKeyStore(path);
+  const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+  const running = first.withFlow(O, 'ws', async () => {
+    order.push('first-start');
+    await gate;
+    order.push('first-end');
+  });
+  await Bun.sleep(30);
+  let waited = 0;
+  const queued = second.withFlow(
+    O,
+    'ws',
+    async () => void order.push('second'),
+    () => void waited++,
+  );
+  await Bun.sleep(400);
+  expect(order).toEqual(['first-start']); // the second flow is held back
+  release();
+  await Promise.all([running, queued]);
+  expect(order).toEqual(['first-start', 'first-end', 'second']);
+  expect(waited).toBe(1);
+  expect(readdirSync(cfg)).toEqual([]); // flow locks removed
+});
+
+test('flows of different workspaces or origins do not block each other', async () => {
+  const store = openKeyStore(path);
+  const inside: string[] = [];
+  const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+  const one = store.withFlow(O, 'a', async () => {
+    inside.push('a');
+    await gate;
+  });
+  await store.withFlow(O, 'b', async () => void inside.push('b'));
+  await store.withFlow('https://other.test', 'a', async () => void inside.push('other'));
+  expect(inside).toEqual(['a', 'b', 'other']);
+  release();
+  await one;
+});
+
+test('a flow lock left by a killed run is reclaimed', async () => {
+  const store = openKeyStore(path, { flowWaitMs: 300 });
+  let flowPath = '';
+  await store.withFlow(O, 'ws', async () => {
+    flowPath = readdirSync(cfg).find((f) => f.startsWith('keys.flow-')) ?? '';
+  });
+  expect(flowPath).not.toBe('');
+  writeFileSync(
+    join(cfg, flowPath),
+    JSON.stringify({
+      pid: await deadPid(),
+      host: hostname(),
+      ts: Date.now(),
+      start: null,
+      token: 't',
+    }),
+  );
+  let ran = false;
+  await store.withFlow(O, 'ws', async () => void (ran = true));
+  expect(ran).toBe(true);
+});
+
+test('a flow that waits too long fails with a message naming the lock file', async () => {
+  const store = openKeyStore(path, { flowWaitMs: 300 });
+  const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+  const holder = store.withFlow(O, 'ws', () => gate);
+  await Bun.sleep(30);
+  await expect(store.withFlow(O, 'ws', async () => undefined)).rejects.toThrow(
+    /delete .*keys\.flow-/,
+  );
+  release();
+  await holder;
 });
 
 test('a pre-existing group/world-writable key directory is locked down before use', () => {

@@ -17,6 +17,8 @@ export interface Io {
   /** Shows the question on stderr and resolves with the line the user typed (empty for a bare Enter). */
   ask(question: string): Promise<string>;
   copy(text: string): Promise<boolean>;
+  /** Pauses between attempts (sweep); injected so tests do not wait. */
+  sleep(ms: number): Promise<void>;
 }
 
 export interface Ctx {

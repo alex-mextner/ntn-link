@@ -5,6 +5,7 @@
  */
 import { ApiFailure } from './api';
 import { type Ctx, say } from './ctx';
+import { DEFAULT_ORIGIN } from './config';
 import { EXIT, Fail } from './errors';
 import type { ChallengeAction, ChallengeResponse, VerifyResponse } from '../../core/src/api-types';
 
@@ -56,33 +57,50 @@ function saveKey(ctx: Ctx, ws: string, key: string, previous: string | null): st
   }
 }
 
+/** The hint embeds the workspace in a command to copy: only plain names, whatever the server says. */
+const SAFE_WORKSPACE = /^[a-z0-9][a-z0-9-]*$/i;
+
 function reportVerified(ctx: Ctx, result: VerifyResponse): void {
   if (result.action !== 'rotate') {
     say(ctx, `Verified. You now own "${result.workspace}".`);
-    return;
-  }
-  say(
-    ctx,
-    `Key rotated; ${result.removedLinks} link(s) pointing to pages that are no longer public were removed.`,
-  );
-  if (!result.cleanupComplete) {
+  } else {
     say(
       ctx,
-      'Warning: the service could not finish removing links to pages that are no longer public; some may remain until it sweeps again.',
+      `Key rotated; ${result.removedLinks} link(s) pointing to pages that are no longer public were removed.`,
     );
   }
+  if (result.cleanupComplete) return;
+  say(
+    ctx,
+    'Warning: the service could not finish removing links to pages that are no longer public; some may remain until it sweeps again.',
+  );
+  if (!SAFE_WORKSPACE.test(result.workspace)) return;
+  say(ctx, `run: ntn-link sweep ${result.workspace}`);
+  if (ctx.origin !== DEFAULT_ORIGIN)
+    say(ctx, `(for the service at ${ctx.origin}: add --origin ${ctx.origin})`);
 }
 
 export interface Proof {
   key: string;
-  /** The page the service checked: the linked page unless the user named another. */
-  verifiedUrl: string;
+  /**
+   * The page the service checked: the linked page unless the user named another. Null when no
+   * check was needed because another run finished the verification first and its key is used.
+   */
+  verifiedUrl: string | null;
 }
 
+/**
+ * Runs the ownership check for `ws` and returns the key to use. `startKey` is the key this run
+ * found (and the server rejected) before asking for a check. Flows of one workspace are
+ * serialized across processes: the second one waits, and if the first saved a different key
+ * meanwhile, that key is returned instead of starting another rotation that would invalidate it.
+ */
 export async function proveOwnership(
   ctx: Ctx,
   url: string,
+  ws: string,
   action: ChallengeAction,
+  startKey: string | null,
 ): Promise<Proof> {
   if (!ctx.io.isTTY) {
     throw new Fail(
@@ -91,9 +109,35 @@ export async function proveOwnership(
       EXIT.verificationNeedsTerminal,
     );
   }
+  return ctx.keys.withFlow(
+    ctx.origin,
+    ws,
+    async () => {
+      const current = ctx.keys.get(ctx.origin, ws);
+      if (current !== null && current !== startKey) {
+        say(ctx, `Another ntn-link run finished the ownership check for "${ws}"; using its key.`);
+        ctx.log.secret(current);
+        return { key: current, verifiedUrl: null };
+      }
+      return verifyOnce(ctx, url, ws, action, current);
+    },
+    () => say(ctx, `Another ntn-link run is verifying "${ws}"; waiting for it to finish...`),
+  );
+}
+
+async function verifyOnce(
+  ctx: Ctx,
+  url: string,
+  ws: string,
+  action: ChallengeAction,
+  previous: string | null,
+): Promise<Proof> {
   say(ctx, 'Requesting an ownership challenge...');
   const challenge = await ctx.api.challenge(url, action);
   ctx.log.secret(challenge.claimToken);
+  if (challenge.workspace !== ws) {
+    throw new Fail('The server returned a challenge for a different workspace.', EXIT.failure);
+  }
   if (!/^ntn-verify-[a-z0-9]+$/.test(challenge.nonce)) {
     throw new Fail('The server returned a malformed challenge code.', EXIT.failure);
   }
@@ -102,7 +146,6 @@ export async function proveOwnership(
   );
   for (const line of nonceInstructions(challenge)) say(ctx, line);
 
-  const previous = ctx.keys.get(ctx.origin, challenge.workspace);
   let verifiedUrl = url;
   for (let attempt = 1; ; attempt++) {
     const answer = await ctx.io.ask(

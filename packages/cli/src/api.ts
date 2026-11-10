@@ -15,6 +15,7 @@ import type {
   LinkView,
   ListLinksResponse,
   PreviewResponse,
+  SweepLinksResponse,
   UpdateLinkRequest,
   UpdateLinkResponse,
   VerifyResponse,
@@ -42,9 +43,11 @@ export interface Timeouts {
   default: number;
   /** /api/verify on a rotation re-fetches every link of the namespace before it answers. */
   verify: number;
+  /** /api/ns/<ws>/sweep re-checks every link of the namespace too. */
+  sweep: number;
 }
 
-export const DEFAULT_TIMEOUTS: Timeouts = { default: 30_000, verify: 180_000 };
+export const DEFAULT_TIMEOUTS: Timeouts = { default: 30_000, verify: 180_000, sweep: 180_000 };
 
 function isErrorBody(value: unknown): value is ApiErrorBody {
   if (typeof value !== 'object' || value === null || !('error' in value)) return false;
@@ -69,6 +72,7 @@ export interface Api {
   ): Promise<UpdateLinkResponse>;
   deleteLink(target: string, key: string | null): Promise<DeleteLinkResponse>;
   listLinks(ws: string, key: string | null): Promise<ListLinksResponse>;
+  sweepLinks(ws: string, key: string | null): Promise<SweepLinksResponse>;
 }
 
 const SECRET_FIELDS = new Set(['ownerKey', 'claimToken']);
@@ -108,7 +112,11 @@ const isStr = (value: unknown): value is string => typeof value === 'string';
  * able to put wrong types into the key file or onto stdout. Only the fields the CLI uses are checked.
  */
 const isPreview = (v: unknown): v is PreviewResponse =>
-  isRec(v) && isStr(v['workspace']) && isRec(v['card']) && isStr(v['card']['title']);
+  isRec(v) &&
+  isStr(v['workspace']) &&
+  isStr(v['pageId']) &&
+  isRec(v['card']) &&
+  isStr(v['card']['title']);
 
 const isChallenge = (v: unknown): v is ChallengeResponse =>
   isRec(v) &&
@@ -140,6 +148,11 @@ const isLink = (v: unknown): v is LinkView =>
 const isLinkEnvelope = (v: unknown): v is { link: LinkView } => isRec(v) && isLink(v['link']);
 const isLinkList = (v: unknown): v is ListLinksResponse =>
   isRec(v) && Array.isArray(v['links']) && v['links'].every(isLink);
+const isSweep = (v: unknown): v is SweepLinksResponse =>
+  isRec(v) &&
+  isStr(v['workspace']) &&
+  typeof v['removedLinks'] === 'number' &&
+  typeof v['cleanupComplete'] === 'boolean';
 const isDeleted = (v: unknown): v is DeleteLinkResponse => isRec(v) && v['deleted'] === true;
 
 const encodePath = (target: string): string => target.split('/').map(encodeURIComponent).join('/');
@@ -249,5 +262,14 @@ export function createApi(
       call('DELETE', `/api/links/${encodePath(target)}`, undefined, key, isDeleted),
     listLinks: (ws, key) =>
       call('GET', `/api/ns/${encodeURIComponent(ws)}/links`, undefined, key, isLinkList),
+    sweepLinks: (ws, key) =>
+      call(
+        'POST',
+        `/api/ns/${encodeURIComponent(ws)}/sweep`,
+        undefined,
+        key,
+        isSweep,
+        timeouts.sweep,
+      ),
   };
 }

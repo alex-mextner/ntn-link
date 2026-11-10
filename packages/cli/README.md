@@ -16,6 +16,7 @@ npx ntn-link https://thsm.notion.site/Our-trips-413d447ac4b180169985c93eea7f02f9
 ntn-link <notion-url> [--slug name] [--fast] [--copy] [--origin URL]
 ntn-link ls <workspace>
 ntn-link rm <workspace>/<slug>
+ntn-link sweep <workspace>
 ntn-link set <workspace>/<slug> [--title T] [--description D] [--slug S]
                                 [--fast on|off] [--canonical self|notion]
 ```
@@ -29,8 +30,19 @@ ntn-link set <workspace>/<slug> [--title T] [--description D] [--slug S]
 | `set --title ""` | An empty `--title` or `--description` removes that override.                                                                                                |
 
 **stdout carries only the result**: the link for the create command, tab-separated
-`slug<TAB>title<TAB>link` rows for `ls`. Progress, prompts, errors and the log path go
-to stderr, so `link=$(ntn-link <url>)` and pipes just work.
+`slug<TAB>title<TAB>link` rows for `ls` (`rm`, `set` and `sweep` print nothing there). Progress,
+prompts, errors and the log path go to stderr, so `link=$(ntn-link <url>)` and pipes just work.
+
+## Sweeping after a key rotation
+
+When a key is rotated, the service removes links whose pages are no longer public. If it could
+not finish, the CLI prints `run: ntn-link sweep <workspace>`. That command calls the service's
+owner-only, idempotent sweep (with the saved key) and repeats it, up to 10 attempts two seconds
+apart, until the service reports that the cleanup is complete. It prints nothing while it works
+and a single summary line on stderr at the end (nothing on stdout). A service that does not
+offer the sweep route (HTTP 404 or 405) gets a clear message and exit code 12; a sweep that is
+still unfinished after the last attempt exits with 11 (run it again later). The sweep is
+rate-limited by the service, so do not loop it by hand.
 
 ## Ownership: the first link in a workspace
 
@@ -45,7 +57,8 @@ the CLI:
 3. lets the service check the page title, then stores the resulting **owner key**;
 4. if the code is on the page you are linking, asks you to remove it again (and checks
    that Notion no longer shows it) before creating the link, so neither the preview
-   nor the slug carries the code.
+   nor the slug carries the code. Which page the code was put on is decided by the
+   service's own page id (the same one `/api/preview` returns), not by parsing the URL you pasted.
 
 The private half of the challenge (the `claimToken`) is kept in memory for that one
 run and is never printed, logged or written to disk. Later runs need no verification.
@@ -57,8 +70,14 @@ command once interactively.
 Owner keys live in `$XDG_CONFIG_HOME/ntn-link/keys.json` (default
 `~/.config/ntn-link/keys.json`), file mode `0600` in a `0700` directory, saved per
 service origin and workspace: a key issued by one service is never sent to another one
-(for example when you pass a different `--origin`). Parallel runs are safe (the file is
-updated under a lock). The key is sent only as an `Authorization: Bearer` header, and
+(for example when you pass a different `--origin`). Parallel runs are safe: the file is
+updated under a lock, and two runs that both need the ownership check for the same workspace
+take turns (the second one waits, then uses the key the first one saved instead of rotating it
+again). A lock records the pid and time of its holder; one left behind by a killed run is
+reclaimed automatically once that process is gone (a reused pid is recognised by its start time
+on Linux). A live holder is only waited for, never taken over: after the bounded wait the error
+names the lock file to delete. Only a lock that cannot be probed (another machine sharing the
+home directory) is reclaimed by age, after a generous bound. The key is sent only as an `Authorization: Bearer` header, and
 only over HTTPS (plain HTTP is accepted for `localhost` development only).
 
 ## Log file
@@ -83,8 +102,11 @@ authorization headers are never written to it.
 | 8    | Rate limited (`rate_limited`)                                                       |
 | 9    | Challenge failed (`challenge_expired`, `challenge_invalid`, `nonce_not_found`)      |
 | 10   | Network failure                                                                     |
+| 11   | `sweep` did not finish after its attempts (run it again later)                      |
+| 12   | `sweep` is not supported by the service (HTTP 404/405 on the route)                 |
 
-Server error messages are printed as is.
+A code the CLI does not know (including names like `constructor`) is exit 1. Server error
+messages are printed as is.
 
 ## Environment
 

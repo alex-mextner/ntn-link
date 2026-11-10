@@ -24,11 +24,14 @@ const slow = Bun.serve({
         cleanupComplete: true,
       });
     }
+    if (path === '/api/ns/w/sweep') {
+      return Response.json({ workspace: 'w', removedLinks: 1, cleanupComplete: true });
+    }
     return Response.json({ error: { code: 'not_found', message: 'nope' } }, { status: 404 });
   },
 });
 
-test('a verify that takes longer than the ordinary deadline still succeeds; other calls time out', async () => {
+test('verify and sweep outlive the ordinary deadline (namespace-wide work); other calls time out', async () => {
   const log = openRunLog(new Date(), 99, dir);
   const api = createApi(
     `http://127.0.0.1:${slow.port}`,
@@ -38,10 +41,17 @@ test('a verify that takes longer than the ordinary deadline still succeeds; othe
     {
       default: 100,
       verify: 3000,
+      sweep: 3000,
     },
   );
   const verified = await api.verify('https://w.notion.site/x', 'ntn-verify-aaaaaaaaaa', 'token');
   expect(verified.ownerKey).toHaveLength(20);
+  expect(await api.sweepLinks('w', 'key')).toEqual({
+    workspace: 'w',
+    removedLinks: 1,
+    cleanupComplete: true,
+  });
+  await expect(api.listLinks('w', 'key')).rejects.toBeInstanceOf(NetworkFailure);
   await expect(api.preview('https://w.notion.site/x')).rejects.toBeInstanceOf(NetworkFailure);
   log.close();
   slow.stop(true);

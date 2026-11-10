@@ -10,6 +10,7 @@ export type Command =
   | { kind: 'create'; url: string; slug?: string; fast: boolean; copy: boolean }
   | { kind: 'ls'; ws: string }
   | { kind: 'rm'; target: string }
+  | { kind: 'sweep'; ws: string }
   | {
       kind: 'set';
       target: string;
@@ -174,6 +175,11 @@ function parseCommand(flags: Flags): Command {
     const target = requireTarget(arg, 'rm');
     noExtra(flags, [], 'rm', 2);
     return { kind: 'rm', target };
+  }
+  if (verb === 'sweep') {
+    if (arg === undefined || arg.includes('/')) throw new UsageError('sweep needs <workspace>');
+    noExtra(flags, [], 'sweep', 2);
+    return { kind: 'sweep', ws: arg };
   }
   if (verb === 'help') return { kind: 'help' };
   if (verb === undefined) throw new UsageError('missing Notion URL');
