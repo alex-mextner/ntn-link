@@ -27,12 +27,7 @@ export type { RateLimitedAction } from './rate-limit';
 export { timingSafeEqual, sha256Hex } from './crypto';
 export { fetchCardImage } from './card-image';
 export type { FetchedImage } from './card-image';
-export {
-  createService,
-  CARD_IMAGE_WIDTH,
-  CARD_CACHE_TTL_MS,
-  REFRESH_AFTER_MS,
-} from './service';
+export { createService, CARD_IMAGE_WIDTH, CARD_CACHE_TTL_MS, REFRESH_AFTER_MS } from './service';
 export type { Service, ServiceDeps, Caller, CardSource, RedirectPageResult } from './service';
 export { Repository } from './records';
 export type { LinkRecord, NamespaceRecord, ChallengeRecord } from './records';

@@ -720,7 +720,11 @@ describe('rotation edge cases around the key replacement', () => {
     const staleRaw = await h.store.get('ns:thsm');
     const first = await challengeFor('thsm', 1, 'rotate');
     publishNonce(1, first.nonce);
-    await h.service.verify({ url: pageUrl('thsm', 1), nonce: first.nonce, claimToken: first.claimToken });
+    await h.service.verify({
+      url: pageUrl('thsm', 1),
+      nonce: first.nonce,
+      claimToken: first.claimToken,
+    });
 
     // A cold instance whose replica still answers reads with the pre-rotation record.
     const get = h.store.get.bind(h.store);

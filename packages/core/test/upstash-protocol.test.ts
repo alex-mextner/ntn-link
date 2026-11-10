@@ -52,17 +52,17 @@ describe('UpstashStore values', () => {
   });
 });
 
-describe('UpstashStore malformed replies', () => {
-  const replying = (result: unknown): UpstashStore => {
-    stubFetch(async () => Response.json({ result }));
-    return newStore();
-  };
-  const expectUpstreamError = async (pending: Promise<unknown>): Promise<void> => {
-    const failure = await pending.catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(ApiError);
-    expect(failure).toMatchObject({ code: 'upstream_error' });
-  };
+const replying = (result: unknown): UpstashStore => {
+  stubFetch(async () => Response.json({ result }));
+  return newStore();
+};
+const expectUpstreamError = async (pending: Promise<unknown>): Promise<void> => {
+  const failure = await pending.catch((error: unknown) => error);
+  expect(failure).toBeInstanceOf(ApiError);
+  expect(failure).toMatchObject({ code: 'upstream_error' });
+};
 
+describe('UpstashStore malformed replies', () => {
   test('a 200 reply with an object where a string belongs is a fault, not a missing record', async () => {
     await expectUpstreamError(replying({ keyHash: 'abc' }).get('ns:x'));
     await expectUpstreamError(replying(7).get('ns:x'));
