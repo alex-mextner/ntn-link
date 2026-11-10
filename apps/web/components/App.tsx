@@ -17,11 +17,13 @@ import {
   initialState,
   isVerificationPhase,
   previewCard,
+  previewIcon,
   reducer,
   visibleUrlError,
   type Action,
   type FlowState,
   type Step,
+  pendingActions,
 } from '@/lib/client/flow';
 import type { KeyStorage } from '@/lib/client/keys';
 import type { PreviewResponse } from '../../../packages/core/src/api-types';
@@ -129,6 +131,7 @@ export function App() {
         <CardPreview
           card={state.preview ? (previewCard(state) ?? state.preview.card) : null}
           excerpt={state.preview?.excerpt ?? []}
+          icon={previewIcon(state)}
           host={host}
           sourceHost={state.preview ? `${state.preview.workspace}.notion.site` : host}
           mode={previewMode}
@@ -164,8 +167,23 @@ export function App() {
   );
 }
 
-/** Screen-reader narration of the step the page moved to (errors announce themselves as alerts). */
+/**
+ * Screen-reader narration of what the page is doing or moved to: a request in flight is announced
+ * the moment it starts (errors announce themselves as alerts). A background cleanup is only
+ * announced while the flow itself has nothing to say, so it never hides the step the person is on.
+ */
 function announcement(state: FlowState): string {
+  const pending = pendingActions(state);
+  if (pending.includes('create')) return en.announce.creating;
+  if (pending.includes('challenge')) return en.announce.requestingChallenge;
+  if (pending.includes('verify')) return en.announce.verifying;
+  if (pending.includes('fast')) return en.announce.savingFast;
+  const step = stepAnnouncement(state);
+  if (step === '' && pending.includes('cleanup')) return en.announce.cleaning;
+  return step;
+}
+
+function stepAnnouncement(state: FlowState): string {
   switch (state.phase) {
     case 'previewing':
       return en.announce.previewing;
@@ -351,12 +369,14 @@ function SlugField({
 function Switch({
   checked,
   disabled,
+  busy,
   onChange,
   label,
   hint,
 }: {
   checked: boolean;
   disabled?: boolean;
+  busy?: boolean;
   onChange: (checked: boolean) => void;
   label: string;
   hint?: string;
@@ -368,11 +388,15 @@ function Switch({
         role="switch"
         checked={checked}
         disabled={disabled}
+        // aria-disabled keeps keyboard focus while a save runs; setFast ignores the change.
+        aria-disabled={busy ? true : undefined}
+        aria-busy={busy ? true : undefined}
         onChange={(event) => onChange(event.target.checked)}
       />
       <span className="switch-track" aria-hidden="true" />
       <span className="switch-text">
         {label}
+        {busy ? <SpinnerIcon size={14} /> : null}
         {hint ? <span className="hint block">{hint}</span> : null}
       </span>
     </label>
@@ -507,8 +531,18 @@ function CreateForm({
         disabled={slugCheck !== 'ok' || locked}
         aria-busy={state.phase === 'creating' ? true : undefined}
       >
-        {state.phase === 'creating' ? <SpinnerIcon /> : null}
-        <span className="btn-label">{state.phase === 'creating' ? en.creating : en.create}</span>
+        {state.phase === 'creating' ? (
+          <SpinnerIcon />
+        ) : isVerificationPhase(state.phase) ? (
+          <ShieldIcon size={18} />
+        ) : null}
+        <span className="btn-label">
+          {state.phase === 'creating'
+            ? en.creating
+            : isVerificationPhase(state.phase)
+              ? en.createVerifyFirst
+              : en.create}
+        </span>
       </button>
     </form>
   );
@@ -528,8 +562,19 @@ function VerifySection({
 
   const error = state.error;
   const busy = state.phase === 'requesting_challenge' || state.phase === 'verifying';
+  const section = useRef<HTMLElement>(null);
+  // The panel opens below the fold on a phone: bring it into view so the click visibly did something.
+  useEffect(() => {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    section.current?.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' });
+  }, []);
   return (
-    <section aria-labelledby="verify-heading" className="panel panel-verify" aria-busy={busy}>
+    <section
+      ref={section}
+      aria-labelledby="verify-heading"
+      className="panel panel-verify"
+      aria-busy={busy}
+    >
       {busy ? <span className="progress-bar" aria-hidden="true" /> : null}
       <div className="panel-title">
         <span className="badge-icon" aria-hidden="true">
@@ -648,6 +693,7 @@ function SuccessPanel({
         <div className="spaced">
           <Switch
             checked={link.fast}
+            busy={state.fastSaving}
             onChange={(checked) => void controller?.setFast(checked)}
             label={en.fastToggle}
           />

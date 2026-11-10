@@ -6,8 +6,8 @@
 
 /**
  * Emoji and their joiners. The bundled fonts have no emoji, and satori would fetch every
- * emoji picture from a CDN at render time; a card that must render offline draws none.
- * (©, ® and ™ are text, not emoji.)
+ * emoji picture from a CDN at render time, so title and text lines are drawn without any;
+ * the page's own emoji icon is drawn separately as a picture (emoji-picture.ts).
  */
 const EMOJI =
   /(?![©®™])\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u{e0020}-\u{e007f}]|\u200d|\ufe0e|\ufe0f|\u20e3/gu;
@@ -85,10 +85,15 @@ export function planExcerpt(lines: readonly string[], budget: ExcerptBudget): Pl
 export const CARD_TITLE_SIZE = 66;
 export const CARD_TEXT_SIZE = 34;
 export const CARD_TITLE_MAX = 90;
+/** The page icon, drawn above the title beside the workspace label. */
+export const CARD_ICON_SIZE = 96;
+export const CARD_ICON_GAP = 24;
 const CARD_PAD = 56;
 const TITLE_ROWS = 2;
 const TEXT_ROWS = 5;
 const TEXT_ROWS_PER_LINE = 2;
+/** Text rows the taller header row takes away from the excerpt. */
+const ICON_ROWS = 1;
 
 export interface CardText {
   title: string;
@@ -98,18 +103,20 @@ export interface CardText {
 /**
  * What the generated card shows: the clipped title and the leading lines of the page (the
  * description when the page has no text). The image route and the web preview both call this,
- * so the preview can never promise different text than the card carries.
+ * so the preview can never promise different text than the card carries. An icon row above the
+ * title costs one text row.
  */
 export function planCardText(
   title: string,
   excerpt: readonly string[],
   description: string,
+  hasIcon: boolean,
 ): CardText {
   const clipped = clip(title, CARD_TITLE_MAX);
   const titleRows = rowsNeeded(clipped, (1200 - 2 * CARD_PAD) / CARD_TITLE_SIZE, TITLE_ROWS);
   // A title on two rows takes a text row's height from the excerpt so the frame never overflows.
   const lines = planExcerpt(excerpt.length > 0 ? excerpt : [description], {
-    rows: TEXT_ROWS - (titleRows - 1),
+    rows: TEXT_ROWS - (titleRows - 1) - (hasIcon ? ICON_ROWS : 0),
     rowEm: (1200 - 2 * CARD_PAD) / CARD_TEXT_SIZE,
     rowsPerLine: TEXT_ROWS_PER_LINE,
   });

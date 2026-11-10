@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ntn-link/core": "workspace:*",
+    "@twemoji/svg": "^15.0.0",
     "@vercel/functions": "^3.11.1",
     "next": "^16.4.6",
     "react": "^19.3.1",

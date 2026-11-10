@@ -21,6 +21,8 @@ export function MyLinks({
   const [items, setItems] = useState<WorkspaceLinks[]>([]);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  /** `workspace/slug` of the link whose deletion is in flight. */
+  const [deleting, setDeleting] = useState<string | null>(null);
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
 
   useEffect(() => {
@@ -36,10 +38,15 @@ export function MyLinks({
 
   async function remove(workspace: string, slug: string) {
     setConfirming(null);
-    const failure = await controller.deleteLink(workspace, slug);
-    setMessage(failure);
-    const fresh = await controller.loadLinks(workspace);
-    setItems((current) => current.map((item) => (item.workspace === workspace ? fresh : item)));
+    setDeleting(`${workspace}/${slug}`);
+    try {
+      const failure = await controller.deleteLink(workspace, slug);
+      setMessage(failure);
+      const fresh = await controller.loadLinks(workspace);
+      setItems((current) => current.map((item) => (item.workspace === workspace ? fresh : item)));
+    } finally {
+      setDeleting(null);
+    }
   }
 
   function forget(workspace: string) {
@@ -60,6 +67,9 @@ export function MyLinks({
       <div className="msg-slot" aria-live="polite">
         {message ? <InlineError message={message} /> : null}
       </div>
+      <p className="visually-hidden" role="status">
+        {deleting ? en.announce.deleting : ''}
+      </p>
       {items.map((item) => (
         <div key={item.workspace} className="workspace">
           <h3 className="subheading">{en.myLinksWorkspace(item.workspace)}</h3>
@@ -112,10 +122,15 @@ export function MyLinks({
                       <button
                         type="button"
                         className="btn btn-secondary"
-                        aria-label={`${en.delete}: /${link.workspace}/${link.slug}`}
+                        aria-label={`${deleting === key ? en.deleting : en.delete}: /${link.workspace}/${link.slug}`}
+                        aria-busy={deleting === key ? true : undefined}
+                        disabled={deleting !== null}
                         onClick={() => setConfirming(key)}
                       >
-                        {en.delete}
+                        {deleting === key ? <SpinnerIcon /> : null}
+                        <span className="btn-label">
+                          {deleting === key ? en.deleting : en.delete}
+                        </span>
                       </button>
                     )}
                   </div>

@@ -91,6 +91,14 @@ Covers and uploaded icons go through the same image proxy as image blocks
 (`/img/content/<ws>/<slug>/<pageId>?k=cover|icon`, only for the link's own root page). The CSS
 budget is 10 KB (it was 3 KB for the plain layout), asserted in `test/render/page.test.ts`.
 
+An emoji icon (page hero, callouts, sub-page links) is text. The hero names Apple Color Emoji
+first in its font stack, the others fall back to the platform's emoji font, so Apple devices
+draw Apple's own glyphs without us shipping any artwork. The page's own emoji is also the tab
+icon (an inline SVG data URI holding the emoji, no request). Other platforms show their own
+emoji font there: a picture per emoji would be an extra request per emoji on a page whose
+budget is one. The generated card image (`/img/<ws>/<slug>`) is a PNG and cannot use Apple's
+artwork (proprietary, no redistribution grant): it draws Twemoji (design spec 5.2, "Licensing").
+
 Not rendered like Notion (they stay "Open in Notion" links or plain text): syntax highlighting in
 code blocks, equations, embeds and video, files and PDFs, synced blocks, inline databases
 (`collection_view`), external object mentions, bookmark thumbnails, the top bar.
@@ -119,6 +127,11 @@ eagerly (417 KB total with it, 13.7 KB without images).
 
 INP: no JavaScript runs, so TBT and INP are trivially in range.
 
+Production (2026-11-10, https://ntn-link.vercel.app, a fixture page, since deleted): Lighthouse mobile
+performance 100 in 5 serial runs, FCP/LCP 783-864 ms, CLS 0, TBT 0-2 ms; the Notion page itself scored
+25-26 (LCP 8.3-28 s, TBT 3.6-3.9 s) in the same setup. HTML 6.8 KB (2.7 KB brotli), no scripts apart from
+JSON-LD. The real `thsm` page has not been measured live under low load (tracked in UB-139 follow-ups).
+
 ## Known limits
 
 - Pages beyond 5,000 blocks, or 40 chunks, end with a visible "this page continues" link to Notion.
@@ -129,6 +142,9 @@ INP: no JavaScript runs, so TBT and INP are trivially in range.
 - The data API is unofficial; `packages/core/test/render/live.test.ts` (run with `LIVE=1`) fails
   loudly if its shape changes.
 - `collection_view` databases are links, not rendered.
+- A cached `/read` can keep answering 200 from the CDN after its link was deleted (observed live,
+  `x-vercel-cache: HIT`); the redirect page and image return 404. Tracked in UB-144 and its own ticket.
+- Table-of-contents labels for mention, date and equation headings and a few other look gaps: UB-147.
 - No image test page with an `image` block exists in the owner's pages except the Oman sub-page,
   whose recorded chunks (trimmed to the fields the loader reads, signed URLs and
   attribution stripped) are the fixture `render/oman-chunks.json`.

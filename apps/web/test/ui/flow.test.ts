@@ -12,6 +12,7 @@ import {
   visibleUrlError,
   type Action,
   type FlowState,
+  pendingActions,
   type Store,
 } from '../../lib/client/flow';
 import { loadKey } from '../../lib/client/keys';
@@ -800,5 +801,191 @@ describe('my links', () => {
     expect(await ctx.controller.deleteLink('thsm', 'a')).toBeNull();
     expect(await ctx.controller.deleteLink('thsm', 'a')).toMatch(/^[A-Z]/);
     expect(ctx.calls[0]).toMatchObject({ name: 'deleteLink', args: ['thsm', 'a', 'K'] });
+  });
+});
+
+const withKey = () => {
+  const storage = new MemoryStorage();
+  storage.setItem(KEY_NAME, 'K');
+  return storage;
+};
+
+const pending = (ctx: Ctx) => pendingActions(ctx.store.getState());
+
+describe('pending actions are visible from click to answer', () => {
+  test('nothing is pending at rest', () => {
+    expect(pendingActions(initialState)).toEqual([]);
+  });
+
+  test('preview: busy while the request is out, idle after', async () => {
+    const gate = deferred<unknown>();
+    const ctx = setup({ preview: [gate.promise] });
+    ctx.type();
+    const run = ctx.controller.loadPreview();
+    expect(pending(ctx)).toEqual(['preview']);
+    gate.resolve(previewFixture());
+    await run;
+    expect(pending(ctx)).toEqual([]);
+  });
+
+  test('create with a key: busy while the request is out, idle after', async () => {
+    const gate = deferred<unknown>();
+    const ctx = setup({ createLink: [gate.promise] }, withKey());
+    ctx.type();
+    await ctx.controller.loadPreview();
+    const run = ctx.controller.create();
+    expect(pending(ctx)).toEqual(['create']);
+    gate.resolve({ link: linkFixture() });
+    await run;
+    expect(pending(ctx)).toEqual([]);
+    expect(ctx.store.getState().phase).toBe('created');
+  });
+
+  test('create without a key moves to verification at once and sends nothing', async () => {
+    const ctx = setup();
+    ctx.type();
+    await ctx.controller.loadPreview();
+    await ctx.controller.create();
+    expect(ctx.store.getState().phase).toBe('needs_verification');
+    expect(ctx.calls.map((c) => c.name)).toEqual(['preview']);
+    expect(pending(ctx)).toEqual([]);
+  });
+
+  test('request code: busy while the request is out, idle after', async () => {
+    const gate = deferred<unknown>();
+    const ctx = setup({ challenge: [gate.promise] });
+    ctx.type();
+    await ctx.controller.loadPreview();
+    await ctx.controller.create();
+    const run = ctx.controller.requestChallenge();
+    expect(pending(ctx)).toEqual(['challenge']);
+    gate.resolve(challengeFixture);
+    await run;
+    expect(pending(ctx)).toEqual([]);
+  });
+
+  test('verify: busy while the request is out, idle after', async () => {
+    const gate = deferred<unknown>();
+    const ctx = setup({ verify: [gate.promise] });
+    await toAwaitingProof(ctx);
+    const run = ctx.controller.verify();
+    expect(pending(ctx)).toEqual(['verify']);
+    gate.resolve(verifyFixture);
+    await run;
+    expect(pending(ctx)).toEqual([]);
+  });
+
+  test('fast switch: busy while saving, idle after success or failure, no double submit', async () => {
+    const gate = deferred<unknown>();
+    const ctx = setup({ updateLink: [gate.promise, apiError('timeout', 0)] });
+    await toCreated(ctx);
+    const run = ctx.controller.setFast(false);
+    expect(pending(ctx)).toEqual(['fast']);
+    await ctx.controller.setFast(true);
+    expect(ctx.calls.filter((c) => c.name === 'updateLink')).toHaveLength(1);
+    gate.resolve({ link: linkFixture('nashi', { fast: false }) });
+    await run;
+    expect(pending(ctx)).toEqual([]);
+    await ctx.controller.setFast(true);
+    expect(pending(ctx)).toEqual([]);
+    expect(ctx.store.getState().error?.message).toMatch(/try again/i);
+  });
+
+  test('a new preview ends the fast-switch busy state of the link it replaces', () => {
+    let state = reducer(
+      { ...initialState, phase: 'creating' },
+      { type: 'create_succeeded', link: linkFixture('a'), keySaved: true },
+    );
+    state = reducer(state, { type: 'link_fast_started' });
+    expect(pendingActions(state)).toEqual(['fast']);
+    state = reducer(state, { type: 'preview_started' });
+    expect(pendingActions(state)).toEqual(['preview']);
+    state = reducer(state, {
+      type: 'link_fast_changed',
+      workspace: 'thsm',
+      slug: 'a',
+      fast: false,
+    });
+    expect(state.fastSaving).toBe(false);
+    expect(state.result).toBeNull();
+  });
+
+  test('cleanup: busy while the sweep runs, idle after', async () => {
+    const gate = deferred<{ workspace: string; removedLinks: number; cleanupComplete: boolean }>();
+    const ctx = setup({
+      verify: [{ ...verifyFixture, removedLinks: 1, cleanupComplete: false }],
+      sweep: [gate.promise],
+    });
+    await toAwaitingProof(ctx);
+    await ctx.controller.verify();
+    const run = ctx.controller.runCleanup('thsm');
+    expect(pending(ctx)).toEqual(['cleanup']);
+    gate.resolve({ workspace: 'thsm', removedLinks: 0, cleanupComplete: true });
+    await run;
+    expect(pending(ctx)).toEqual([]);
+  });
+});
+
+const timeout = () => apiError('timeout', 0);
+
+describe('a request that timed out is an error the person can retry', () => {
+  test('preview: the URL field shows the error and Enter retries', async () => {
+    const ctx = setup({ preview: [timeout()] });
+    ctx.type();
+    await ctx.controller.loadPreview();
+    const state = ctx.store.getState();
+    expect(state.phase).toBe('idle');
+    expect(pendingActions(state)).toEqual([]);
+    expect(visibleUrlError(state)?.message).toMatch(/did not answer in time/);
+    await ctx.controller.loadPreview();
+    expect(ctx.store.getState().phase).toBe('ready');
+    expect(ctx.store.getState().error).toBeNull();
+  });
+
+  test('create: back to a usable form with the error, and pressing again works', async () => {
+    const storage = new MemoryStorage();
+    storage.setItem(KEY_NAME, 'K');
+    const ctx = setup({ createLink: [timeout()] }, storage);
+    ctx.type();
+    await ctx.controller.loadPreview();
+    await ctx.controller.create();
+    const state = ctx.store.getState();
+    expect(state.phase).toBe('ready');
+    expect(state.error).toMatchObject({ code: 'timeout', scope: 'general' });
+    expect(loadKey(storage, ORIGIN, 'thsm')).toBe('K');
+    await ctx.controller.create();
+    expect(ctx.store.getState().phase).toBe('created');
+  });
+
+  test('request code: back to the button with the error, and pressing again works', async () => {
+    const ctx = setup({ challenge: [timeout()] });
+    ctx.type();
+    await ctx.controller.loadPreview();
+    await ctx.controller.create();
+    await ctx.controller.requestChallenge();
+    expect(ctx.store.getState().phase).toBe('needs_verification');
+    expect(ctx.store.getState().error?.code).toBe('timeout');
+    await ctx.controller.requestChallenge();
+    expect(ctx.store.getState().phase).toBe('awaiting_proof');
+    expect(ctx.store.getState().error).toBeNull();
+  });
+
+  test('verify: back to the code with the error, and pressing again works', async () => {
+    const ctx = setup({ verify: [timeout()] });
+    await toAwaitingProof(ctx);
+    await ctx.controller.verify();
+    expect(ctx.store.getState().phase).toBe('awaiting_proof');
+    expect(ctx.store.getState().error?.code).toBe('timeout');
+    expect(ctx.store.getState().verification?.nonce).toBe(challengeFixture.nonce);
+    await ctx.controller.verify();
+    expect(ctx.store.getState().phase).toBe('ready');
+  });
+
+  test('delete and list report the timeout in words', async () => {
+    const storage = new MemoryStorage();
+    storage.setItem(KEY_NAME, 'K');
+    const ctx = setup({ deleteLink: [timeout()], listLinks: [timeout()] }, storage);
+    expect(await ctx.controller.deleteLink('thsm', 'a')).toMatch(/did not answer in time/);
+    expect((await ctx.controller.loadLinks('thsm')).error).toMatch(/did not answer in time/);
   });
 });

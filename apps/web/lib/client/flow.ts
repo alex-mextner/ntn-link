@@ -11,6 +11,7 @@
  */
 import type {
   CardData,
+  CardIcon,
   ChallengeAction,
   LinkView,
   PreviewResponse,
@@ -78,6 +79,8 @@ export interface FlowState {
   result: { link: LinkView; keySaved: boolean } | null;
   /** Unfinished or just finished post-rotation sweeps, one per workspace. */
   cleanups: Cleanup[];
+  /** The fast-page switch of the created link is being saved. */
+  fastSaving: boolean;
   error: FlowError | null;
 }
 
@@ -97,6 +100,7 @@ export const initialState: FlowState = {
   notice: null,
   result: null,
   cleanups: [],
+  fastSaving: false,
   error: null,
 };
 
@@ -122,6 +126,7 @@ export type Action =
   | { type: 'verify_failed'; error: FlowError; restart: boolean }
   | { type: 'verified' }
   | { type: 'cleanup_set'; workspace: string; cleanup: Cleanup | null }
+  | { type: 'link_fast_started' }
   | { type: 'link_fast_changed'; workspace: string; slug: string; fast: boolean }
   | { type: 'reset' };
 
@@ -139,6 +144,7 @@ const handlers: Handlers = {
     error: null,
     verification: null,
     result: null,
+    fastSaving: false,
   }),
   preview_loaded: (state, action) =>
     state.phase !== 'previewing'
@@ -179,7 +185,7 @@ const handlers: Handlers = {
         },
   create_failed: (state, action) =>
     state.phase !== 'creating' ? state : { ...state, phase: 'ready', error: action.error },
-  action_failed: (state, action) => ({ ...state, error: action.error }),
+  action_failed: (state, action) => ({ ...state, fastSaving: false, error: action.error }),
   verification_needed: (state, action) => ({
     ...state,
     phase: 'needs_verification',
@@ -231,6 +237,8 @@ const handlers: Handlers = {
     ...state,
     cleanups: setCleanup(state.cleanups, action.workspace, action.cleanup),
   }),
+  link_fast_started: (state) =>
+    state.result ? { ...state, fastSaving: true, error: null } : state,
   link_fast_changed: (state, action) =>
     !state.result ||
     state.result.link.workspace !== action.workspace ||
@@ -238,6 +246,7 @@ const handlers: Handlers = {
       ? state
       : {
           ...state,
+          fastSaving: false,
           result: {
             ...state.result,
             link: {
@@ -279,6 +288,23 @@ export function isVerificationPhase(phase: Phase): boolean {
   );
 }
 
+export type PendingAction = 'preview' | 'create' | 'challenge' | 'verify' | 'fast' | 'cleanup';
+
+/**
+ * Every request of the flow that is in flight right now. The UI shows a spinner, disables the
+ * control that started it and narrates it for screen readers for as long as it is listed here.
+ */
+export function pendingActions(state: FlowState): PendingAction[] {
+  const pending: PendingAction[] = [];
+  if (state.phase === 'previewing') pending.push('preview');
+  if (state.phase === 'creating') pending.push('create');
+  if (state.phase === 'requesting_challenge') pending.push('challenge');
+  if (state.phase === 'verifying') pending.push('verify');
+  if (state.fastSaving) pending.push('fast');
+  if (state.cleanups.some((cleanup) => cleanup.status === 'running')) pending.push('cleanup');
+  return pending;
+}
+
 /** The card as the created link will show it: overrides win, an empty override falls back. */
 export function previewCard(state: FlowState): CardData | null {
   if (!state.preview) return null;
@@ -289,6 +315,9 @@ export function previewCard(state: FlowState): CardData | null {
     description: state.description.trim() || card.description,
   };
 }
+
+/** The page icon of the preview, for the generated card's mirror; null before there is one. */
+export const previewIcon = (state: FlowState): CardIcon | null => state.preview?.icon ?? null;
 
 /**
  * The error to show next to the URL field: URL-scoped errors, and any error while there is no

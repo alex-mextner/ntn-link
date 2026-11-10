@@ -5,7 +5,7 @@ import { en } from './strings';
 const MESSAGES: Record<ErrorCode, string> = en.errors;
 
 export class ApiCallError extends Error {
-  readonly code: ErrorCode | 'network' | 'unexpected';
+  readonly code: ErrorCode | 'network' | 'timeout' | 'unexpected';
   readonly status: number;
   readonly action: 'claim' | 'rotate' | undefined;
   readonly retryAfterSeconds: number | undefined;
@@ -45,6 +45,7 @@ export function errorFromBody(status: number, body: unknown): ApiCallError {
 export function describeError(error: unknown): string {
   if (!(error instanceof ApiCallError)) return en.errorsExtra.unexpected;
   if (error.code === 'network') return en.errorsExtra.network;
+  if (error.code === 'timeout') return en.errorsExtra.timeout;
   if (error.code === 'unexpected') return en.errorsExtra.unexpected;
   if (error.code === 'rate_limited' && error.retryAfterSeconds !== undefined) {
     return en.errorsExtra.rateLimitedAfter(error.retryAfterSeconds);

@@ -29,6 +29,7 @@ export const en = {
   fastHint: 'A lightweight copy of the page that opens instantly (/read)',
   create: 'Create link',
   creating: 'Creating…',
+  createVerifyFirst: 'Verification required',
   stepsLabel: 'Progress',
   stepNames: { preview: 'Preview', verify: 'Verify', create: 'Create', share: 'Share' },
   stepStatus: {
@@ -43,6 +44,13 @@ export const en = {
     needsVerification: 'Ownership verification required',
     awaitingProof: 'Verification code ready',
     created: 'Link created',
+    creating: 'Creating the link',
+    requestingChallenge: 'Requesting the verification code',
+    verifying: 'Checking the code on the Notion page',
+    savingFast: 'Saving the fast page setting',
+    deleting: 'Deleting the link',
+    cleaning: 'Cleaning up links',
+    copying: 'Copying',
   },
   verifyHeading: 'Verify you own this workspace',
   verifyClaim: (workspace: string) =>
@@ -71,6 +79,7 @@ export const en = {
   verifyAgain: 'Get a new code',
   copy: 'Copy',
   copied: 'Copied',
+  copying: 'Copying…',
   copyFailed: 'Could not copy, select the text manually',
   successHeading: 'Your link is ready',
   redirectLinkLabel: 'Short link',
@@ -139,6 +148,7 @@ export const en = {
   } satisfies Record<ErrorCode, string>,
   errorsExtra: {
     network: 'No connection to the server. Check your network and try again.',
+    timeout: 'The server did not answer in time. Check your connection and try again.',
     unexpected: 'Something went wrong. Please try again.',
     rateLimitedAfter: (seconds: number) => `Too many requests. Try again in ${seconds} s.`,
   },
