@@ -132,3 +132,25 @@ describe('page icon on the card', () => {
     expect(logged).toHaveLength(1);
   });
 });
+
+const isLight = (r: number, g: number, b: number) => Math.min(r, g, b) > 200;
+
+describe('logo mark on the card', () => {
+  // The footer row is 40 px tall at the bottom-left (56 px padding); the 56 px logo is centred on it.
+  const FOOTER_LOGO: Box = { x: 56, y: 630 - 56 - 48, width: 56, height: 56 };
+
+  test('the footer carries the logo as light line art, on every card', async () => {
+    for (const icon of [null, { kind: 'emoji', emoji: '🤿' } as const]) {
+      const card = await renderPixels(icon);
+      // The logo is thin line art, a few percent of its box lit: a gradient tile would be coloured, not light.
+      expect(countPixels(card, FOOTER_LOGO, isLight)).toBeGreaterThan(60);
+      expect(countPixels(card, FOOTER_LOGO, isSaturated)).toBeLessThan(40);
+    }
+  });
+
+  test('the mark stays inside the footer row: the row above it is as empty as before', async () => {
+    const card = await renderPixels(null);
+    const above: Box = { x: 56, y: 630 - 56 - 48 - 6, width: 56, height: 4 };
+    expect(countPixels(card, above, isLight)).toBe(0);
+  });
+});

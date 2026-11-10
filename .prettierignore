@@ -6,3 +6,4 @@ apps/web/assets/
 extension/dist/
 packages/cli/dist/
 .worktrees/
+packages/core/src/brand.ts

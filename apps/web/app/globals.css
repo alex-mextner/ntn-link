@@ -216,22 +216,15 @@ p {
   border-radius: 12px;
 }
 
-.wordmark-glyph {
-  display: grid;
-  place-items: center;
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 11px;
-  background: var(--grad);
-  color: var(--btn-ink);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
-    0 6px 18px -6px var(--btn-glow);
+.wordmark-logo {
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
   transition: transform var(--dur) var(--ease);
 }
 
-.wordmark:hover .wordmark-glyph {
-  transform: rotate(-8deg) scale(1.04);
+.wordmark:hover .wordmark-logo {
+  transform: rotate(-6deg) scale(1.05);
 }
 
 .wordmark-text {
@@ -1572,8 +1565,7 @@ textarea.input {
 
 @media (forced-colors: active) {
   .btn-primary,
-  .step-dot,
-  .wordmark-glyph {
+  .step-dot {
     border: 1px solid ButtonText;
   }
 

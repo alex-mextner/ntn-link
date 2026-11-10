@@ -190,9 +190,9 @@ describe('renderFastPage hero', () => {
     expect(svg).not.toContain('<&');
   });
 
-  test('a picture icon or none keeps the ntn.link favicon, with no request of its own', () => {
+  test('a picture icon or none keeps the logo favicon, with no request of its own', () => {
     const brand = faviconSvg(renderFastPage(input(heroOf(null))));
-    expect(brand).toContain('<rect');
+    expect(brand).toContain('<path');
     expect(brand).not.toContain('<text');
     const picture = faviconSvg(renderFastPage(input(heroOf({ kind: 'image', image }))));
     expect(picture).toBe(brand);
