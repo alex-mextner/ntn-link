@@ -57,6 +57,12 @@ describe('renderFastPage (thsm)', () => {
     expect(html).toContain('<html lang="ru">');
   });
 
+  test('one main landmark around the article, and an inline icon instead of a /favicon.ico request', () => {
+    expect(html).toContain('<main>\n<article>');
+    expect(html.match(/<main>/g)).toHaveLength(1);
+    expect(html).toMatch(/<link rel="icon" href="data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+">/);
+  });
+
   test('Open Graph and Twitter tags match the redirect card', () => {
     expect(html).toContain(`<meta property="og:image" content="${ORIGIN}/img/thsm/our-trips">`);
     expect(html).not.toContain('og:image:width');

@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react';
 import type { Cleanup } from '@/lib/client/flow';
 import type { Controller, WorkspaceLinks } from '@/lib/client/controller';
-import { ru } from '@/lib/client/strings';
+import { en } from '@/lib/client/strings';
 import { plainText } from '@/lib/client/text';
 import { CopyButton } from './CopyButton';
+import { AlertIcon, ArrowUpRightIcon, CheckIcon, SpinnerIcon } from './icons';
 
 /** Links of every workspace this browser holds a key for (spec section 6, "My links"). */
 export function MyLinks({
@@ -49,28 +50,22 @@ export function MyLinks({
   if (items.length === 0 && cleanups.length === 0) return null;
 
   return (
-    <section aria-labelledby="mylinks-heading" className="panel">
-      <h2 id="mylinks-heading">{ru.myLinks}</h2>
+    <section aria-labelledby="mylinks-heading" className="panel panel-links">
+      <div className="panel-title">
+        <h2 id="mylinks-heading">{en.myLinks}</h2>
+      </div>
       {cleanups.map((cleanup) => (
         <CleanupNotice key={cleanup.workspace} cleanup={cleanup} controller={controller} />
       ))}
       <div className="msg-slot" aria-live="polite">
-        {message ? (
-          <p className="field-error" role="alert">
-            {message}
-          </p>
-        ) : null}
+        {message ? <InlineError message={message} /> : null}
       </div>
       {items.map((item) => (
         <div key={item.workspace} className="workspace">
-          <h3 className="subheading">{ru.myLinksWorkspace(item.workspace)}</h3>
-          {item.status === 'error' ? (
-            <p className="field-error" role="alert">
-              {item.error}
-            </p>
-          ) : null}
+          <h3 className="subheading">{en.myLinksWorkspace(item.workspace)}</h3>
+          {item.status === 'error' ? <InlineError message={item.error ?? ''} /> : null}
           {item.status === 'ready' && item.links.length === 0 ? (
-            <p className="hint">{ru.myLinksEmpty}</p>
+            <p className="hint">{en.myLinksEmpty}</p>
           ) : null}
           <ul className="links">
             {item.links.map((link) => {
@@ -81,9 +76,10 @@ export function MyLinks({
                   <div className="link-main">
                     <a
                       href={`/${encodeURIComponent(link.workspace)}/${encodeURIComponent(link.slug)}`}
-                      className="mono"
+                      className="link-path mono"
                     >
                       {`/${link.workspace}/${link.slug}`}
+                      <ArrowUpRightIcon size={14} />
                     </a>
                     <span className="link-title">{plainText(link.card.title)}</span>
                   </div>
@@ -93,33 +89,33 @@ export function MyLinks({
                       <span
                         className="confirm"
                         role="group"
-                        aria-label={ru.deleteConfirm(link.slug)}
+                        aria-label={en.deleteConfirm(link.slug)}
                       >
-                        <span>{ru.deleteConfirm(link.slug)}</span>
+                        <span>{en.deleteConfirm(link.slug)}</span>
                         <button
                           type="button"
-                          className="btn danger"
+                          className="btn btn-danger"
                           onClick={() => void remove(link.workspace, link.slug)}
                         >
-                          {ru.confirmYes}
+                          {en.confirmYes}
                         </button>
                         <button
                           type="button"
-                          className="btn secondary"
+                          className="btn btn-secondary"
                           onClick={() => setConfirming(null)}
                           autoFocus
                         >
-                          {ru.confirmNo}
+                          {en.confirmNo}
                         </button>
                       </span>
                     ) : (
                       <button
                         type="button"
-                        className="btn secondary"
-                        aria-label={`${ru.delete}: /${link.workspace}/${link.slug}`}
+                        className="btn btn-secondary"
+                        aria-label={`${en.delete}: /${link.workspace}/${link.slug}`}
                         onClick={() => setConfirming(key)}
                       >
-                        {ru.delete}
+                        {en.delete}
                       </button>
                     )}
                   </div>
@@ -127,8 +123,8 @@ export function MyLinks({
               );
             })}
           </ul>
-          <button type="button" className="btn link" onClick={() => forget(item.workspace)}>
-            {ru.forgetKey}
+          <button type="button" className="btn btn-link" onClick={() => forget(item.workspace)}>
+            {en.forgetKey}
           </button>
         </div>
       ))}
@@ -136,31 +132,44 @@ export function MyLinks({
   );
 }
 
+function InlineError({ message, alert = true }: { message: string; alert?: boolean }) {
+  return (
+    <p className="field-error" role={alert ? 'alert' : undefined}>
+      <AlertIcon size={16} />
+      <span>{message}</span>
+    </p>
+  );
+}
+
 function CleanupNotice({ cleanup, controller }: { cleanup: Cleanup; controller: Controller }) {
   if (cleanup.status === 'done') {
     return (
       <p className="notice" role="status">
-        {cleanup.message}
+        <CheckIcon size={18} />
+        <span>{cleanup.message}</span>
       </p>
     );
   }
   return (
     <div className="notice" role="group" aria-labelledby={`cleanup-heading-${cleanup.workspace}`}>
       <h3 id={`cleanup-heading-${cleanup.workspace}`} className="subheading">
-        {ru.cleanupHeading(cleanup.workspace)}
+        {en.cleanupHeading(cleanup.workspace)}
       </h3>
-      <p>{ru.cleanupBody(cleanup.removedLinks)}</p>
+      <p>{en.cleanupBody(cleanup.removedLinks)}</p>
       <div className="msg-slot" aria-live="polite">
-        {cleanup.message ? <p className="field-error">{cleanup.message}</p> : null}
+        {cleanup.message ? <InlineError message={cleanup.message} alert={false} /> : null}
       </div>
       {cleanup.status !== 'unsupported' ? (
         <button
           type="button"
-          className="btn primary"
+          className="btn btn-primary"
           disabled={cleanup.status === 'running'}
           onClick={() => void controller.runCleanup(cleanup.workspace)}
         >
-          {cleanup.status === 'running' ? ru.cleanupRunning : ru.cleanupRun}
+          {cleanup.status === 'running' ? <SpinnerIcon /> : null}
+          <span className="btn-label">
+            {cleanup.status === 'running' ? en.cleanupRunning : en.cleanupRun}
+          </span>
         </button>
       ) : null}
     </div>

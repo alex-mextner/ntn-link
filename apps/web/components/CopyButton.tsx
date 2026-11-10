@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ru } from '@/lib/client/strings';
+import { en } from '@/lib/client/strings';
+import { CheckIcon, CopyIcon } from './icons';
 
-/** Copies `text` and announces the result in a polite live region (no layout shift: fixed label slot). */
+/** Copies `text`, shows a check mark for a moment and announces the result in a polite live region. */
 export function CopyButton({ text, label }: { text: string; label: string }) {
   const [status, setStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -30,16 +31,19 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
     <span className="copy">
       <button
         type="button"
-        className="btn secondary"
+        className="btn btn-secondary"
+        data-state={status}
+        data-return-focus=""
         onClick={copy}
-        aria-label={`${ru.copy}: ${label}`}
+        aria-label={`${status === 'copied' ? en.copied : en.copy}: ${label}`}
       >
-        {status === 'copied' ? ru.copied : ru.copy}
+        {status === 'copied' ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
+        <span className="btn-label">{status === 'copied' ? en.copied : en.copy}</span>
       </button>
       <span className="visually-hidden" role="status">
-        {status === 'copied' ? ru.copied : status === 'failed' ? ru.copyFailed : ''}
+        {status === 'copied' ? en.copied : status === 'failed' ? en.copyFailed : ''}
       </span>
-      {status === 'failed' ? <span className="field-error">{ru.copyFailed}</span> : null}
+      {status === 'failed' ? <span className="field-error">{en.copyFailed}</span> : null}
     </span>
   );
 }

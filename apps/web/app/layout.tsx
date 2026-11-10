@@ -4,20 +4,24 @@ import type { ReactNode } from 'react';
 import './globals.css';
 
 export const metadata = {
-  title: 'ntn.link: короткие ссылки на публичные страницы Notion',
+  title: 'ntn.link: short links for public Notion pages',
   description:
-    'Короткие читаемые ссылки на публичные страницы Notion, которые разворачиваются в мессенджерах с настоящим заголовком, описанием и картинкой.',
+    'Short, readable links for public Notion pages that unfurl in messengers with the real title, description and image.',
 };
 
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
   colorScheme: 'light dark',
+  themeColor: [
+    { media: '(prefers-color-scheme: dark)', color: '#07070c' },
+    { media: '(prefers-color-scheme: light)', color: '#f6f6fb' },
+  ],
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="ru">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );
