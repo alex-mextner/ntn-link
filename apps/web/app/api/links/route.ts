@@ -7,6 +7,7 @@ export function POST(request: Request): Promise<Response> {
     const service = getService();
     await limit(service, 'links', request);
     const body = await readBody(request, createLinkRequestSchema);
-    return json(await service.createLink(body, bearerKey(request)), 201);
+    const { created, ...response } = await service.createLink(body, bearerKey(request));
+    return json(response, created ? 201 : 200);
   });
 }

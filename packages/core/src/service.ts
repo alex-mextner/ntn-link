@@ -30,7 +30,9 @@ import {
   isOwner,
   issueChallenge,
   requiredActionFor,
+  DEFAULT_SWEEP_BUDGET,
   sweepGoneLinks,
+  type SweepBudget,
   verifyChallenge,
   type OwnershipDeps,
 } from './ownership';
@@ -42,6 +44,8 @@ export const CARD_IMAGE_WIDTH = 1200;
 /** Metadata is refreshed lazily when older than this (spec 5.2). */
 export const REFRESH_AFTER_MS = 24 * 60 * 60 * 1000;
 const SLUG_SUFFIX_ATTEMPTS = 30;
+const PAGE_LOCK_POLL_MS = 100;
+const PAGE_LOCK_WAIT_ATTEMPTS = 50;
 /**
  * How long a resolved card image is reused per instance before Notion is asked again. Short
  * because an unpublished page must stop serving its image promptly; never served past it.
@@ -57,6 +61,8 @@ export interface ServiceDeps {
   now?: () => Date;
   /** Purge edge caches for both link forms of `<ws>/<slug>`. */
   purge?: (workspace: string, slug: string) => Promise<void>;
+  /** Overrides of `DEFAULT_SWEEP_BUDGET`, mainly for tests. */
+  sweepBudget?: Partial<SweepBudget>;
 }
 
 /** Who is calling a link-mutating endpoint. */
@@ -71,11 +77,21 @@ export type CardSource =
   | { kind: 'notion-image'; url: string; title: string; description: string }
   | { kind: 'generated'; title: string; description: string };
 
+/** `CreateLinkResponse` plus whether this call created the link (HTTP 201) or found it (200). */
+export interface CreateLinkOutcome extends CreateLinkResponse {
+  created: boolean;
+}
+
 export interface Service {
   preview(request: PreviewRequest, ownerKey: string | null): Promise<PreviewResponse>;
   issueChallenge(request: ChallengeRequest): Promise<ChallengeResponse>;
   verify(request: VerifyRequest): Promise<VerifyResponse>;
-  createLink(request: CreateLinkRequest, ownerKey: string | null): Promise<CreateLinkResponse>;
+  /**
+   * Creates a link. Without an explicit `slug`, a page that already has a link in the namespace
+   * yields that link (`created: false`) instead of a second `-2` link; an explicit slug always
+   * creates a new link.
+   */
+  createLink(request: CreateLinkRequest, ownerKey: string | null): Promise<CreateLinkOutcome>;
   updateLink(
     workspace: string,
     slug: string,
@@ -185,6 +201,7 @@ export function createService(deps: ServiceDeps): Service {
     fetcher: deps.fetcher,
     now,
     onLinkRemoved: purge,
+    sweepBudget: { ...DEFAULT_SWEEP_BUDGET, ...deps.sweepBudget },
   };
 
   const redirectUrl = (ws: string, slug: string): string => `${deps.origin}/${ws}/${slug}`;
@@ -274,6 +291,43 @@ export function createService(deps: ServiceDeps): Service {
     }
   }
 
+  async function findPageLink(workspace: string, pageId: string): Promise<LinkRecord | undefined> {
+    return (await repo.listLinks(workspace))
+      .filter((record) => record.pageId === pageId)
+      .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+  }
+
+  /**
+   * Runs the automatic creation of a link for a page one request at a time and answers with the
+   * page's existing link when there is one. A request that finds the lock taken waits for the
+   * holder's link instead of racing it.
+   */
+  async function withPageCreationLock(
+    workspace: string,
+    pageId: string,
+    create: () => Promise<CreateLinkOutcome>,
+    reuse: (existing: LinkRecord) => Promise<CreateLinkOutcome>,
+  ): Promise<CreateLinkOutcome> {
+    for (let attempt = 0; attempt <= PAGE_LOCK_WAIT_ATTEMPTS; attempt++) {
+      const lease = await repo.acquirePageCreation(workspace, pageId);
+      if (lease !== null) {
+        try {
+          const existing = await findPageLink(workspace, pageId);
+          return existing === undefined ? await create() : await reuse(existing);
+        } finally {
+          await repo.releasePageCreation(workspace, pageId, lease);
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, PAGE_LOCK_POLL_MS));
+      const existing = await findPageLink(workspace, pageId);
+      if (existing !== undefined) return reuse(existing);
+    }
+    throw new ApiError(
+      'upstream_error',
+      'Another request is creating a link for this page. Try again.',
+    );
+  }
+
   return {
     store: deps.store,
     origin: deps.origin,
@@ -322,29 +376,44 @@ export function createService(deps: ServiceDeps): Service {
         );
       }
       const meta = page.metadata;
-      const overrides = request.overrides ?? {};
-      const nowIso = now().toISOString();
-      const created = await reserveSlug(
-        {
-          workspace: page.workspace,
-          pageId: page.pageId,
-          canonicalUrl: page.canonicalUrl,
-          title: meta.title,
-          description: meta.description,
-          imageUrl: meta.imageUrl,
-          language: meta.language,
-          fetchedAt: nowIso,
-          createdAt: nowIso,
-          overrides,
-          fast: request.fast ?? true,
-          canonicalMode: 'self',
-          goneAt: null,
-        },
-        request.slug,
-        slugify(overrides.title ?? meta.title),
-      );
-      await purge(created.workspace, created.slug);
-      return { link: view(created) };
+      const create = async (): Promise<CreateLinkOutcome> => {
+        const overrides = request.overrides ?? {};
+        const nowIso = now().toISOString();
+        const created = await reserveSlug(
+          {
+            workspace: page.workspace,
+            pageId: page.pageId,
+            canonicalUrl: page.canonicalUrl,
+            title: meta.title,
+            description: meta.description,
+            imageUrl: meta.imageUrl,
+            language: meta.language,
+            fetchedAt: nowIso,
+            createdAt: nowIso,
+            overrides,
+            fast: request.fast ?? true,
+            canonicalMode: 'self',
+            goneAt: null,
+          },
+          request.slug,
+          slugify(overrides.title ?? meta.title),
+        );
+        await purge(created.workspace, created.slug);
+        return { link: view(created), created: true };
+      };
+      if (request.slug !== undefined) return create();
+      // Idempotent for clients that retry after a timeout: the page already has a link here.
+      const reuse = async (existing: LinkRecord): Promise<CreateLinkOutcome> => {
+        if (existing.goneAt === null) return { link: view(existing), created: false };
+        // The page is public again (just fetched), so the returned link must serve it again.
+        const nowIso = now().toISOString();
+        const revived = await repo.updateLink(existing.workspace, existing.slug, (latest) =>
+          latest.pageId === page.pageId ? applyFetchResult(latest, page, nowIso) : latest,
+        );
+        await purge(existing.workspace, existing.slug);
+        return { link: view(revived ?? existing), created: false };
+      };
+      return withPageCreationLock(page.workspace, page.pageId, create, reuse);
     },
 
     async updateLink(workspace, slug, request, ownerKey) {
@@ -406,7 +475,15 @@ export function createService(deps: ServiceDeps): Service {
 
     async sweepLinks(workspace, ownerKey) {
       await requireOwnerOf(workspace, ownerKey);
-      const { removedLinks, complete } = await sweepGoneLinks(ownership, workspace);
+      const namespace = await repo.getNamespace(workspace);
+      if (namespace === null) {
+        throw new ApiError('namespace_not_claimed', `The namespace "${workspace}" is not claimed.`);
+      }
+      const { removedLinks, complete } = await sweepGoneLinks(
+        ownership,
+        workspace,
+        namespace.keyHash,
+      );
       return { workspace, removedLinks, cleanupComplete: complete };
     },
 

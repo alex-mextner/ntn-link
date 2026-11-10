@@ -12,7 +12,8 @@ client can `import type` from it.
 
 ## HTTP API
 
-All bodies are JSON. Success is HTTP 200, except `POST /api/links` which answers 201.
+All bodies are JSON. Success is HTTP 200, except `POST /api/links` which answers 201 when it creates a link
+(and 200 with the existing link when it is a retry, see below).
 Errors are always `{ "error": { "code", "message", "action?", "retryAfterSeconds?" } }` with the
 status from the table below; clients may rely on `code`, not on the status.
 
@@ -26,7 +27,7 @@ core only receives `Caller = { kind: 'operator' }`.)
 | POST   | `/api/preview`             | `PreviewRequest`    | `PreviewResponse`     | optional Bearer key       |
 | POST   | `/api/challenge`           | `ChallengeRequest`  | `ChallengeResponse`   | none                      |
 | POST   | `/api/verify`              | `VerifyRequest`     | `VerifyResponse`      | none                      |
-| POST   | `/api/links`               | `CreateLinkRequest` | `CreateLinkResponse`  | Bearer key (201)          |
+| POST   | `/api/links`               | `CreateLinkRequest` | `CreateLinkResponse`  | Bearer key (201 / 200)    |
 | PATCH  | `/api/links/<ws>/<slug>`   | `UpdateLinkRequest` | `UpdateLinkResponse`  | Bearer key                |
 | DELETE | `/api/links/<ws>/<slug>`   | -                   | `{ "deleted": true }` | Bearer key or admin token |
 | GET    | `/api/ns/<ws>/links`       | -                   | `ListLinksResponse`   | Bearer key                |
@@ -100,7 +101,9 @@ interface LinkView {
   workspace: string; slug: string; pageId: string; canonicalUrl: string; card: CardData; overrides: TextOverrides;
   fast: boolean; canonicalMode: CanonicalMode; createdAt: string; redirectUrl: string; fastUrl: string | null;
 }
-interface CreateLinkResponse { link: LinkView }   // UpdateLinkResponse is identical
+interface CreateLinkResponse { link: LinkView }   // UpdateLinkResponse is identical. Without `slug`, a page that already has a
+// link in the namespace returns that link with HTTP 200 (idempotent retry, also when it overlaps the original request; request `overrides`/`fast` are ignored).
+// With an explicit `slug` a new link is created (201), so one page can carry several links.
 interface DeleteLinkResponse { deleted: true }
 interface ListLinksResponse { workspace: string; links: LinkView[] }   // sorted by createdAt
 interface SweepLinksResponse { workspace: string; removedLinks: number; cleanupComplete: boolean }
@@ -118,7 +121,9 @@ was replaced again while its sweep ran also fails with `challenge_expired` inste
 dead key. If storage cannot confirm a rotation, `verify` fails closed with `upstream_error`
 ("request a new rotate challenge") and the challenge is consumed. Rotation sweeps links whose target is no longer public in that workspace
 (`removedLinks`; `cleanupComplete: false` means call `POST /api/ns/<ws>/sweep` with the new key until it
-reports `true`; the sweep is idempotent and owner-only).
+reports `true`; the sweep is idempotent and owner-only). Every sweep call (including the one inside `verify`) is
+time-bounded (20 s, at most 100 Notion fetches, 8 in flight); links already confirmed public for the current
+key are not fetched again, so repeated calls converge (links whose fetch failed are retried after the untried ones; a call returns by its deadline even if storage or the cache purge is slow). The key replacement happens first and never rolls back.
 
 ## Service (`createService(deps): Service`)
 
@@ -142,7 +147,7 @@ interface Service {
   preview(request, ownerKey: string | null): Promise<PreviewResponse>;
   issueChallenge(request: ChallengeRequest): Promise<ChallengeResponse>;
   verify(request: VerifyRequest): Promise<VerifyResponse>;
-  createLink(request, ownerKey): Promise<CreateLinkResponse>;
+  createLink(request, ownerKey): Promise<CreateLinkOutcome>; // CreateLinkResponse + created: boolean (201 vs 200)
   updateLink(workspace, slug, request, ownerKey): Promise<UpdateLinkResponse>;
   deleteLink(workspace, slug, caller: Caller): Promise<void>;
   listLinks(workspace, ownerKey): Promise<ListLinksResponse>;
