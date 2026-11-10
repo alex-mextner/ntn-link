@@ -141,3 +141,5 @@ Limits: at most 200 links per namespace. Rate limits are per client IP (fixed wi
 | `sweep`     | 10 / 600 s |
 
 Run `bun run smoke:notion` after changing anything that parses Notion output.
+
+License: MIT (see [LICENSE](LICENSE)).
