@@ -1,0 +1,31 @@
+{
+  "name": "ntn-link",
+  "version": "0.1.0",
+  "description": "Short, pretty links for public Notion pages. Prints the link, keeps your owner key in ~/.config.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "ntn-link": "dist/ntn-link.js"
+  },
+  "files": [
+    "dist/ntn-link.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "notion",
+    "short-link",
+    "cli"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "prepack": "bun run scripts/build.ts",
+    "typecheck": "tsc --noEmit"
+  }
+}
