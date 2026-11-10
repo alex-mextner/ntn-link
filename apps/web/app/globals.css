@@ -1062,14 +1062,15 @@ textarea.input {
   line-height: 1.35;
 }
 
-/* The generated title card, drawn in CSS so the preview matches what /img will serve. */
+/* The generated card, drawn in CSS so the preview matches what /img serves: title, then the
+   beginning of the page in large type (the sizes are the card's 66/34 px over 1200 px). */
 .unfurl-fallback {
   position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 6cqi;
+  padding: 4.7cqi;
   color: #f3f3f8;
   background:
     radial-gradient(90% 120% at 100% 0%, rgba(124, 92, 255, 0.5), transparent 60%),
@@ -1078,21 +1079,47 @@ textarea.input {
 }
 
 .unfurl-fallback-host {
+  align-self: flex-start;
+  padding: 0.6cqi 1.5cqi;
   font-family: var(--mono);
-  font-size: 3.4cqi;
-  color: #b9b9d0;
+  font-size: 2cqi;
+  color: #c9c9de;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 99px;
+}
+
+.unfurl-fallback-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1cqi;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .unfurl-fallback-title {
   display: -webkit-box;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  font-size: 7.4cqi;
+  margin-bottom: 1.4cqi;
+  font-size: 5.5cqi;
   font-weight: 750;
   line-height: 1.12;
   letter-spacing: -0.02em;
+}
+
+.unfurl-fallback-line {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 2.83cqi;
+  font-weight: 650;
+  line-height: 1.32;
+  color: #bdbdd6;
 }
 
 /* Telegram: message bubble, quote bar, blue site name, media under the text. */

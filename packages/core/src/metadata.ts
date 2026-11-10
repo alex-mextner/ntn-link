@@ -6,11 +6,13 @@
  * Notion's machine-generated head and avoiding a DOM dependency at the edge.
  */
 
+import { isNotionPlaceholderImageUrl } from './notion-placeholder';
+
 export interface PageMetadata {
   /** Title with the trailing " | Notion" removed. */
   title: string;
   description: string;
-  /** Social image as served by Notion, or null for Notion's generic default image. */
+  /** The page's own cover as served by Notion, or null when Notion only offers its generic banner. */
   imageUrl: string | null;
   language: string | null;
 }
@@ -64,9 +66,6 @@ export function stripNotionSuffix(title: string): string {
   return title.replace(NOTION_SUFFIX, '').trim();
 }
 
-/** Notion serves this to plain clients that are not recognised as unfurlers. */
-const GENERIC_NOTION_IMAGE = /\/images\/meta\/default\.png$/;
-
 export function extractMetadata(html: string): PageMetadata {
   const meta = readMetaTags(html);
   const titleTag = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1];
@@ -80,7 +79,7 @@ export function extractMetadata(html: string): PageMetadata {
   if (image !== undefined && image !== '') {
     try {
       const parsed = new URL(image);
-      imageUrl = GENERIC_NOTION_IMAGE.test(parsed.pathname) ? null : parsed.href;
+      imageUrl = isNotionPlaceholderImageUrl(parsed.href) ? null : parsed.href;
     } catch {
       imageUrl = null;
     }

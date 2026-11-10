@@ -42,6 +42,7 @@ export function previewFixture(overrides: Partial<PreviewResponse> = {}): Previe
       imageUrl: null,
       language: 'ru',
     },
+    excerpt: [],
     proposedSlug: 'nashi-s-lenochkoy-puteshestviya',
     namespaceClaimed: false,
     needsVerification: true,

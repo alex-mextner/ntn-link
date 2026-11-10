@@ -123,6 +123,11 @@ export interface PreviewResponse {
   /** Canonical `https://<ws>.notion.site/<32-hex-id>` the redirect link will lead to. */
   canonicalUrl: string;
   card: CardData;
+  /**
+   * The first lines of the page's text, for pages without a cover: the generated card shows
+   * them under the title. Empty when the page has its own image or no text.
+   */
+  excerpt: string[];
   /** Free slug proposed from the title. */
   proposedSlug: string;
   /** True when the namespace is unclaimed. */

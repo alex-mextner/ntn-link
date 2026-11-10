@@ -4,11 +4,19 @@
  * whole path is testable without Next.js and with an injected `fetch`.
  */
 import type { LinkRecord } from '../records';
-import { renderBlocks } from './blocks';
-import { imageSourceOf, resolveFreshImage, sniffImageSize, type ImageSize } from './image';
+import { emojiOfIcon, renderBlocks } from './blocks';
+import {
+  IMAGE_WIDTHS,
+  imageSourceOf,
+  pageImageSourceOf,
+  resolveFreshImage,
+  sniffImageSize,
+  type ImageSize,
+  type PageImageSlot,
+} from './image';
 import { dashedId, loadPageChunk } from './page-chunk';
 import { NotionDataError, plainTextOf, type NotionBlock, type RecordMap } from './records';
-import { renderFastPage } from './page';
+import { renderFastPage, type PageHero, type PageImage } from './page';
 
 const MAX_SIZE_PROBES = 12;
 
@@ -72,6 +80,50 @@ async function sniffMissingSizes(
   return sizes;
 }
 
+/** Proxy URL of the page's own cover or icon picture, `w` being the rendition width. */
+function pageImageUrl(link: LinkRecord, root: NotionBlock, slot: PageImageSlot, w: number): string {
+  return `/img/content/${link.workspace}/${link.slug}/${root.id}?k=${slot}&v=${root.lastEditedTime ?? root.version ?? 0}&w=${w}`;
+}
+
+function pageImageOf(
+  link: LinkRecord,
+  root: NotionBlock,
+  slot: PageImageSlot,
+  position: number,
+): PageImage | null {
+  if (pageImageSourceOf(root, slot, link.workspace) === null) return null;
+  const [small, large] = IMAGE_WIDTHS;
+  const src = pageImageUrl(link, root, slot, small);
+  return {
+    src,
+    srcset: `${src} ${small}w, ${pageImageUrl(link, root, slot, large)} ${large}w`,
+    position,
+  };
+}
+
+/** Cover, icon and the per-page display options of the root page. */
+function heroOf(root: NotionBlock | undefined, link: LinkRecord): PageHero {
+  if (root === undefined) {
+    return { icon: null, cover: null, fullWidth: false, smallText: false, font: 'sans' };
+  }
+  const { format } = root;
+  const emoji = emojiOfIcon(format.page_icon);
+  const iconImage = emoji === null ? pageImageOf(link, root, 'icon', 0.5) : null;
+  const font = format.page_font;
+  return {
+    icon:
+      emoji !== null
+        ? { kind: 'emoji', text: emoji }
+        : iconImage === null
+          ? null
+          : { kind: 'image', image: iconImage },
+    cover: pageImageOf(link, root, 'cover', format.page_cover_position ?? 0.5),
+    fullWidth: format.page_full_width === true,
+    smallText: format.page_small_text === true,
+    font: font === 'serif' || font === 'mono' ? font : 'sans',
+  };
+}
+
 const isoOrUndefined = (ms: number | undefined): string | undefined =>
   ms === undefined ? undefined : new Date(ms).toISOString();
 
@@ -114,6 +166,7 @@ export async function buildFastPage(args: BuildFastPageArgs): Promise<FastPageRe
     editedAt: isoOrUndefined(root?.lastEditedTime),
     createdAt: isoOrUndefined(root?.createdTime),
     body,
+    hero: heroOf(root, link),
   });
   return { status: 200, html };
 }

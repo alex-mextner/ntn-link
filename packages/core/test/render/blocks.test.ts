@@ -37,8 +37,9 @@ describe('thsm page (recorded)', () => {
     expect(html.match(/<h[2-4]\b/g)).toHaveLength(4);
     expect(html.match(/<hr>/g)).toHaveLength(1);
     expect(html.match(/<p>/g)).toHaveLength(2); // two of the three text blocks have text
+    expect(html.match(/<p class="e">/g)).toHaveLength(1); // the third is a blank line
     // 8 sub-page links, plus the collection_view_page and the collection_view.
-    expect(html.match(/class="sub"/g)).toHaveLength(8);
+    expect(html.match(/class="pg"/g)).toHaveLength(8);
     expect(html.match(/class="unsupported"/g)).toHaveLength(2);
   });
 });
@@ -128,8 +129,8 @@ describe('every supported type (synthetic)', () => {
     expect(html).toContain('<tbody>\n<tr><td>a</td><td>b</td></tr>');
     expect(html).toContain('style="flex:0.25"');
     expect(html).toContain('style="flex:0.75"');
-    expect(html).toContain(
-      '<pre><code class="language-javascript">if (a &lt; b) { x() }</code></pre>',
+    expect(html).toMatch(
+      /<pre data-l="[^"]*"><code class="language-javascript">if \(a &lt; b\) \{ x\(\) \}<\/code><\/pre>/,
     );
     expect(html).toContain('href="https://example.com/a?b=1&amp;c=2"');
     expect(html).toContain('<aside class="callout"><span class="ico" aria-hidden="true">🚕</span>');

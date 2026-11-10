@@ -9,11 +9,15 @@
  */
 import {
   IMAGE_WIDTHS,
+  type NotionBlock,
   NotionDataError,
   dashedId,
   findImageBlock,
   loadPageChunk,
+  loadPageStart,
+  pageImageSourceOf,
   resolveFreshImage,
+  type PageImageSlot,
 } from '@ntn-link/core/render';
 import { getService, linkCacheTag } from '@/lib/service';
 
@@ -43,6 +47,31 @@ function requestedWidth(url: URL): (typeof IMAGE_WIDTHS)[number] | null {
   return IMAGE_WIDTHS.find((w) => w === width) ?? null;
 }
 
+/** `?k=cover|icon` asks for a picture of the page itself instead of an image block. */
+function requestedSlot(url: URL): PageImageSlot | null {
+  const slot = url.searchParams.get('k');
+  return slot === 'cover' || slot === 'icon' ? slot : null;
+}
+
+/**
+ * The block whose picture is served. The cover and an uploaded icon belong to the root page
+ * block; every other block must be an image shown on the page.
+ */
+async function resolveTarget(args: {
+  workspace: string;
+  pageId: string;
+  blockId: string;
+  slot: PageImageSlot | null;
+}): Promise<NotionBlock | null> {
+  const { workspace, pageId, blockId, slot } = args;
+  const rootId = dashedId(pageId);
+  if (slot === null) {
+    return findImageBlock(await loadPageChunk({ workspace, pageId }), rootId, blockId);
+  }
+  if (blockId !== rootId) return null;
+  return (await loadPageStart({ workspace, pageId })).blocks.get(rootId) ?? null;
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ workspace: string; slug: string; blockId: string }> },
@@ -54,12 +83,13 @@ export async function GET(
   const link = await getService().getLink(workspace, slug);
   if (link === null || !link.fast) return plain(404, 'Not found.', tag);
   try {
-    const map = await loadPageChunk({ workspace, pageId: link.pageId });
-    const block = findImageBlock(map, dashedId(link.pageId), blockId);
-    if (block === null) return plain(404, 'Not found.', tag);
+    const slot = requestedSlot(new URL(request.url));
+    const target = await resolveTarget({ workspace, pageId: link.pageId, blockId, slot });
+    if (target === null) return plain(404, 'Not found.', tag);
     const image = await resolveFreshImage({
       workspace,
-      block,
+      block: target,
+      ...(slot === null ? {} : { source: pageImageSourceOf(target, slot, workspace) }),
       width,
       accept: request.headers.get('accept') ?? undefined,
     });

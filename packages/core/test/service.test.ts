@@ -184,6 +184,25 @@ describe('preview', () => {
     expect(p.proposedSlug).toBe('nashi-s-lenochkoy-puteshestviya-2');
     expect((await h.service.listLinks('thsm', key)).links).toHaveLength(1);
   });
+
+  test('a page without a cover carries the start of its text for the generated card', async () => {
+    h.excerpts.set(`thsm/${id(2)}`, ['Day one', '• Pack the bags']);
+    const p = await h.service.preview({ url: pageUrl('thsm', 2) }, key);
+    expect(p.card.imageUrl).toBeNull();
+    expect(p.excerpt).toEqual(['Day one', '• Pack the bags']);
+  });
+
+  test('a page with its own cover carries no excerpt, and the page text is not even loaded', async () => {
+    h.notion.add(id(6), {
+      workspace: 'thsm',
+      title: 'With cover',
+      imageUrl: 'https://thsm.notion.site/image/x?table=block&width=2000',
+    });
+    h.excerpts.set(`thsm/${id(6)}`, ['must not appear']);
+    const p = await h.service.preview({ url: pageUrl('thsm', 6) }, key);
+    expect(p.card.imageUrl).toContain('/image/x');
+    expect(p.excerpt).toEqual([]);
+  });
 });
 
 describe('updating and deleting', () => {
@@ -343,6 +362,43 @@ const served = async (): Promise<string | null> => {
   return card?.kind === 'notion-image' ? card.url : null;
 };
 describe('card source', () => {
+  test('a stored Notion banner is never served, the generated card is drawn instead', async () => {
+    h.notion.add(id(6), {
+      workspace: 'thsm',
+      title: 'Banner',
+      imageUrl: 'https://thsm.notion.site/images/meta/notion-wordmark.png',
+    });
+    await h.service.createLink({ url: pageUrl('thsm', 6), slug: 'banner' }, key);
+    // Even when Notion cannot be reached, the stored value (written before banners were
+    // recognised) must not come back as an image.
+    h.notion.failing.add(id(6));
+    expect(await h.service.cardSource('thsm', 'banner')).toMatchObject({ kind: 'generated' });
+  });
+
+  test('a stored generated "Made with Notion" card is not served when Notion cannot be reached', async () => {
+    h.notion.add(id(6), {
+      workspace: 'thsm',
+      title: 'Legacy',
+      imageUrl:
+        'https://thsm.notion.site/image/attachment%3Aabc%3ASocialMediaPreviewImage.png?table=block&width=2000',
+    });
+    await h.service.createLink({ url: pageUrl('thsm', 6), slug: 'legacy' }, key);
+    h.notion.failing.add(id(6));
+    expect(await h.service.cardSource('thsm', 'legacy')).toMatchObject({ kind: 'generated' });
+  });
+
+  test('the excerpt is read for the page id of the card source, never for whatever the slug is now', async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 2), slug: 'noimg' }, key);
+    h.excerpts.set(`thsm/${id(2)}`, ['Text of page A']);
+    h.excerpts.set(`thsm/${id(1)}`, ['Text of page B']);
+    const source = await h.service.cardSource('thsm', 'noimg');
+    // The slug is deleted and recreated for another page before the excerpt is read.
+    await h.service.deleteLink('thsm', 'noimg', { kind: 'owner', ownerKey: key });
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'noimg' }, key);
+    expect(source).toMatchObject({ kind: 'generated', pageId: id(2) });
+    expect(await h.service.pageExcerpt('thsm', source?.pageId ?? '')).toEqual(['Text of page A']);
+  });
+
   test('uses the freshly resolved Notion image at width 1200, or a generated card without one', async () => {
     h.notion.add(id(6), {
       workspace: 'thsm',

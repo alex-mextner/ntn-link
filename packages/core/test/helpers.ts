@@ -69,6 +69,8 @@ export interface Harness {
   store: MemoryStore;
   service: Service;
   purged: string[];
+  /** Page text lines the stubbed card excerpt loader returns, by `<workspace>/<pageId>`; default none. */
+  excerpts: Map<string, string[]>;
 }
 
 export function harness(): Harness {
@@ -76,6 +78,7 @@ export function harness(): Harness {
   const clock = new Clock();
   const store = new MemoryStore(clock.ms);
   const purged: string[] = [];
+  const excerpts = new Map<string, string[]>();
   const service = createService({
     store,
     fetcher: notion,
@@ -84,8 +87,9 @@ export function harness(): Harness {
     purge: async (ws, slug) => {
       purged.push(`${ws}/${slug}`);
     },
+    loadExcerpt: async (workspace, pageId) => excerpts.get(`${workspace}/${pageId}`) ?? [],
   });
-  return { notion, clock, store, service, purged };
+  return { notion, clock, store, service, purged, excerpts };
 }
 
 /** Runs the whole claim flow for a workspace and returns its owner key. */

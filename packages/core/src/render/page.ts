@@ -28,6 +28,25 @@ export interface FastPageInput {
   editedAt?: string;
   createdAt?: string;
   body: RenderedBlocks;
+  hero: PageHero;
+}
+
+/** A picture of the page itself (cover or uploaded icon) served by our image proxy. */
+export interface PageImage {
+  src: string;
+  /** `src` at two widths, ready for the `srcset` attribute. */
+  srcset: string;
+  /** 0 to 1; how far down the picture the visible band starts (covers only). */
+  position: number;
+}
+
+/** Everything that decorates the top of a Notion page and how it is laid out. */
+export interface PageHero {
+  icon: { kind: 'emoji'; text: string } | { kind: 'image'; image: PageImage } | null;
+  cover: PageImage | null;
+  fullWidth: boolean;
+  smallText: boolean;
+  font: 'sans' | 'serif' | 'mono';
 }
 
 export const fastPageUrl = (origin: string, workspace: string, slug: string): string =>
@@ -68,6 +87,33 @@ function timeTag(editedAt: string | undefined): string {
   return `<time datetime="${escapeHtml(editedAt)}">${escapeHtml(day)}</time>`;
 }
 
+/** Body classes for the page-level display options Notion stores per page. */
+function bodyClass(hero: PageHero): string {
+  const names = [
+    hero.fullWidth ? 'fw' : '',
+    hero.smallText ? 'sm' : '',
+    hero.font === 'sans' ? '' : hero.font,
+  ].filter((name) => name !== '');
+  return names.length === 0 ? '' : ` class="${names.join(' ')}"`;
+}
+
+function coverHtml(cover: PageImage | null): string {
+  if (cover === null) return '';
+  // Notion's position is the share of the picture hidden above the visible band.
+  const y = Math.round((1 - cover.position) * 100);
+  return `<div class="cv"><img src="${escapeHtml(cover.src)}" srcset="${escapeHtml(cover.srcset)}" sizes="100vw" alt="" fetchpriority="high"${y === 50 ? '' : ` style="object-position:50% ${y}%"`}></div>\n`;
+}
+
+function iconHtml(hero: PageHero): string {
+  const { icon } = hero;
+  if (icon === null) return '';
+  const cls = hero.cover === null ? 'pi' : 'pi up';
+  if (icon.kind === 'emoji') {
+    return `<div class="${cls}" aria-hidden="true">${escapeHtml(icon.text)}</div>\n`;
+  }
+  return `<img class="${cls} im" src="${escapeHtml(icon.image.src)}" srcset="${escapeHtml(icon.image.srcset)}" sizes="124px" width="124" height="124" alt="">\n`;
+}
+
 export function renderFastPage(input: FastPageInput): string {
   const selfUrl = fastPageUrl(input.origin, input.workspace, input.slug);
   const title = escapeHtml(input.title);
@@ -82,11 +128,11 @@ ${metaTags(input, selfUrl)}
 <script type="application/ld+json">${articleJsonLd(input, selfUrl)}</script>
 <style>${CRITICAL_CSS}</style>
 </head>
-<body>
+<body${bodyClass(input.hero)}>
 <main>
-<article>
+${coverHtml(input.hero.cover)}<article>
 <header>
-<h1>${title}</h1>
+${iconHtml(input.hero)}<h1>${title}</h1>
 ${timeTag(input.editedAt)}
 </header>
 ${input.body.html}<footer><a class="orig" href="${escapeHtml(input.notionUrl)}" rel="noopener nofollow">Open the original in Notion</a></footer>

@@ -2,6 +2,7 @@
 
 import { useId, useState } from 'react';
 import type { CardData } from '../../../packages/core/src/api-types';
+import { planCardText } from '@/lib/card-layout';
 import { plainText, safeImageUrl } from '@/lib/client/text';
 import { en } from '@/lib/client/strings';
 
@@ -24,11 +25,17 @@ const SAMPLE: CardData = {
  */
 export function CardPreview({
   card,
+  excerpt,
   host,
+  sourceHost,
   mode,
 }: {
   card: CardData | null;
+  /** Leading lines of the page's text, shown on the generated card of a cover-less page. */
+  excerpt: readonly string[];
   host: string;
+  /** The Notion domain the generated card names, `<workspace>.notion.site`. */
+  sourceHost: string;
   mode: UnfurlMode;
 }) {
   const id = useId();
@@ -37,6 +44,8 @@ export function CardPreview({
   const image = mode === 'ready' ? safeImageUrl(shown.imageUrl) : null;
   const title = plainText(shown.title);
   const description = plainText(shown.description);
+  // The very text the generated /img card carries (same planner as the card renderer).
+  const cardText = planCardText(title, excerpt.map(plainText), description);
 
   return (
     <div className="unfurl-block">
@@ -72,8 +81,15 @@ export function CardPreview({
               <img src={image} alt="" referrerPolicy="no-referrer" decoding="async" />
             ) : mode === 'loading' ? null : (
               <span className="unfurl-fallback">
-                <span className="unfurl-fallback-host">{host}</span>
-                <span className="unfurl-fallback-title">{title}</span>
+                <span className="unfurl-fallback-host">{sourceHost}</span>
+                <span className="unfurl-fallback-copy">
+                  <span className="unfurl-fallback-title">{cardText.title}</span>
+                  {cardText.lines.map((line, index) => (
+                    <span key={index} className="unfurl-fallback-line">
+                      {line.text}
+                    </span>
+                  ))}
+                </span>
               </span>
             )}
           </div>

@@ -128,7 +128,9 @@ export function App() {
         />
         <CardPreview
           card={state.preview ? (previewCard(state) ?? state.preview.card) : null}
+          excerpt={state.preview?.excerpt ?? []}
           host={host}
+          sourceHost={state.preview ? `${state.preview.workspace}.notion.site` : host}
           mode={previewMode}
         />
         {state.preview && state.phase !== 'created' ? (

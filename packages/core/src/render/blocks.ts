@@ -6,7 +6,7 @@
  * visible "open in Notion" link), and rendering never throws on hostile input.
  */
 import { imageSourceOf, IMAGE_WIDTHS, type ImageSize } from './image';
-import { escapeHtml, pageUrl, renderRichText, safeHref } from './rich-text';
+import { escapeHtml, pageUrl, parseColour, renderRichText, safeHref } from './rich-text';
 import { plainTextOf, textOf, type NotionBlock, type RecordMap } from './records';
 
 export const MAX_DEPTH = 8;
@@ -31,12 +31,25 @@ export interface RenderedBlocks {
   text: string;
 }
 
+interface TocHeading {
+  level: number;
+  id: string;
+  text: string;
+}
+
 interface Walk {
   map: RecordMap;
   ctx: BlockRenderCtx;
   path: Set<string>;
   depth: number;
-  shared: { blocks: number; images: number; firstImage: string | null; text: string };
+  shared: {
+    blocks: number;
+    images: number;
+    firstImage: string | null;
+    text: string;
+    /** Headings in the order they were rendered, for tables of contents. */
+    headings: TocHeading[];
+  };
 }
 
 type Handler = (block: NotionBlock, walk: Walk) => string;
@@ -89,7 +102,6 @@ const TYPE_LABELS: Readonly<Record<string, string>> = {
   file: 'file',
   pdf: 'PDF',
   equation: 'equation',
-  table_of_contents: 'table of contents',
   synced_block: 'synced block',
   transclusion_container: 'synced block',
 };
@@ -119,60 +131,98 @@ function nested(block: NotionBlock, walk: Walk): string {
   return inner === '' ? '' : `<div class="in">\n${inner}</div>\n`;
 }
 
+/** `class="red tx"` / `class="red bg"` for a block Notion coloured; empty otherwise. */
+function colourClasses(block: NotionBlock): string {
+  const colour = parseColour(block.format.block_color);
+  return colour === null ? '' : `${colour.name} ${colour.background ? 'bg' : 'tx'}`;
+}
+
+/** ` class="..."` joining the given names and the block's colour, or nothing. */
+function classAttr(block: NotionBlock, ...names: string[]): string {
+  const all = [...names, colourClasses(block)].filter((name) => name !== '');
+  return all.length === 0 ? '' : ` class="${all.join(' ')}"`;
+}
+
+/** The block's own text as a paragraph; Notion callouts and quotes often keep their text in children only. */
+function titleParagraph(block: NotionBlock, walk: Walk): string {
+  const html = titleOf(block, walk);
+  return html === '' ? '' : `<p>${html}</p>\n`;
+}
+
 const paragraph: Handler = (block, walk) => {
   const html = titleOf(block, walk);
   note(walk, plainTextOf(block));
-  return `${html === '' ? '' : `<p>${html}</p>\n`}${nested(block, walk)}`;
+  // An empty paragraph is a blank line in Notion and keeps its height here.
+  const own = html === '' ? `<p class="e"></p>\n` : `<p${classAttr(block)}>${html}</p>\n`;
+  return `${own}${nested(block, walk)}`;
 };
 
 const heading: Handler = (block, walk) => {
   const tag = HEADING_TAGS[block.type] ?? 'h2';
   note(walk, plainTextOf(block));
-  const head = `<${tag} id="${noDashes(block.id)}">${titleOf(block, walk)}</${tag}>\n`;
+  const level = TOC_LEVELS[block.type];
+  const plain = plainTextOf(block);
+  if (level !== undefined && plain !== '') {
+    walk.shared.headings.push({ level, id: noDashes(block.id), text: plain });
+  }
+  const head = `<${tag} id="${noDashes(block.id)}"${classAttr(block)}>${titleOf(block, walk)}</${tag}>\n`;
   if (block.content.length === 0) return head;
   // A heading that has children is a toggle heading in Notion.
-  return `<details>\n<summary>${head}</summary>\n${children(block, walk)}</details>\n`;
+  return `<details class="th">\n<summary>${head}</summary>\n${children(block, walk)}</details>\n`;
 };
 
 const listItem: Handler = (block, walk) => {
+  const checked = block.type === 'to_do' && plainTextOf(block, 'checked') === 'Yes';
   const box =
-    block.type === 'to_do'
-      ? `<input type="checkbox" disabled${plainTextOf(block, 'checked') === 'Yes' ? ' checked' : ''}> `
-      : '';
+    block.type === 'to_do' ? `<input type="checkbox" disabled${checked ? ' checked' : ''}> ` : '';
   note(walk, plainTextOf(block));
-  return `<li>${box}${titleOf(block, walk)}${nested(block, walk)}</li>\n`;
+  return `<li${classAttr(block, checked ? 'done' : '')}>${box}${titleOf(block, walk)}${nested(block, walk)}</li>\n`;
 };
 
 const quote: Handler = (block, walk) => {
   note(walk, plainTextOf(block));
-  return `<blockquote><p>${titleOf(block, walk)}</p>\n${children(block, walk)}</blockquote>\n`;
+  return `<blockquote${classAttr(block)}>${titleParagraph(block, walk)}${children(block, walk)}</blockquote>\n`;
 };
 
-function emojiIcon(block: NotionBlock): string {
-  const icon = block.format.page_icon;
+/** The icon when it is an emoji (not an uploaded or linked picture); null otherwise. */
+export function emojiOfIcon(icon: string | undefined): string | null {
   const isEmoji =
-    icon !== undefined && icon.length <= 16 && !/^(https?:|\/|attachment:)/.test(icon);
-  return isEmoji ? `<span class="ico" aria-hidden="true">${escapeHtml(icon)}</span> ` : '';
+    icon !== undefined &&
+    icon !== '' &&
+    icon.length <= 16 &&
+    !/^(https?:|\/|attachment:)/.test(icon);
+  return isEmoji ? icon : null;
+}
+
+function emojiIcon(block: NotionBlock): string {
+  const emoji = emojiOfIcon(block.format.page_icon);
+  return emoji === null ? '' : `<span class="ico" aria-hidden="true">${escapeHtml(emoji)}</span>`;
 }
 
 const callout: Handler = (block, walk) => {
   note(walk, plainTextOf(block));
-  return `<aside class="callout">${emojiIcon(block)}<div><p>${titleOf(block, walk)}</p>\n${children(block, walk)}</div></aside>\n`;
+  return `<aside${classAttr(block, 'callout')}>${emojiIcon(block)}<div>${titleParagraph(block, walk)}${children(block, walk)}</div></aside>\n`;
 };
 
-const code: Handler = (block) => {
+const code: Handler = (block, walk) => {
   const language = (plainTextOf(block, 'language') || '')
     .toLowerCase()
     .replace(/[^a-z0-9+#-]/g, '');
   const cls = language === '' ? '' : ` class="language-${language}"`;
-  return `<pre><code${cls}>${escapeHtml(plainTextOf(block))}</code></pre>\n`;
+  const label = plainTextOf(block, 'language');
+  const dataL = label === '' ? '' : ` data-l="${escapeHtml(label)}"`;
+  const pre = `<pre${dataL}><code${cls}>${escapeHtml(plainTextOf(block))}</code></pre>`;
+  const caption = renderRichText(textOf(block, 'caption'), richCtx(walk));
+  return caption === ''
+    ? `${pre}\n`
+    : `<figure class="cb">${pre}<figcaption>${caption}</figcaption></figure>\n`;
 };
 
 const divider: Handler = () => '<hr>\n';
 
 const toggle: Handler = (block, walk) => {
   note(walk, plainTextOf(block));
-  return `<details>\n<summary>${titleOf(block, walk)}</summary>\n${children(block, walk)}</details>\n`;
+  return `<details${classAttr(block)}>\n<summary>${titleOf(block, walk)}</summary>\n${children(block, walk)}</details>\n`;
 };
 
 const bookmark: Handler = (block, walk) => {
@@ -180,14 +230,21 @@ const bookmark: Handler = (block, walk) => {
   if (href === null) return unsupported(block, block.id, walk);
   const title = plainTextOf(block) || href;
   const description = plainTextOf(block, 'description');
-  const small = description === '' ? '' : `<small>${escapeHtml(description)}</small>`;
-  return `<p class="bookmark"><a href="${escapeHtml(href)}" rel="noopener nofollow">${escapeHtml(title)}</a>${small}</p>\n`;
+  const small =
+    description === '' ? '' : `<span class="d">${escapeHtml(clipText(description, 300))}</span>`;
+  return `<p class="bm"><a href="${escapeHtml(href)}" rel="noopener nofollow"><span class="t">${escapeHtml(clipText(title, 300))}</span>${small}<span class="u">${escapeHtml(clipText(href, 200))}</span></a></p>\n`;
 };
 
 const subPage: Handler = (block, walk) => {
   const href = escapeHtml(notionLink(block, block.id, walk));
-  return `<p class="sub"><a href="${href}" rel="noopener nofollow">${titleOf(block, walk) || 'Untitled'}</a></p>\n`;
+  const icon = emojiIcon(block) || '<span class="ico" aria-hidden="true">📄</span>';
+  return `<p class="pg"><a href="${href}" rel="noopener nofollow">${icon}<span class="t">${titleOf(block, walk) || 'Untitled'}</span></a></p>\n`;
 };
+
+function clipText(text: string, max: number): string {
+  const chars = [...text];
+  return chars.length <= max ? text : `${chars.slice(0, max - 1).join('')}…`;
+}
 
 function imageSize(block: NotionBlock, walk: Walk): ImageSize {
   const { block_width: w, block_height: h, block_aspect_ratio: ratio } = block.format;
@@ -206,7 +263,7 @@ const image: Handler = (block, walk) => {
     const source = plainTextOf(block, 'source') || block.format.display_source || '';
     const href = safeHref(source, walk.ctx);
     if (href === null) return unsupported(block, block.id, walk);
-    return `<p class="bookmark"><a href="${escapeHtml(href)}" rel="noopener nofollow">${caption || 'Image'}</a></p>\n`;
+    return `<p class="pg"><a href="${escapeHtml(href)}" rel="noopener nofollow">${caption || 'Image'}</a></p>\n`;
   }
   const large = walk.ctx.imageUrl(block, IMAGE_WIDTHS[1]) ?? small;
   const first = walk.shared.images++ === 0;
@@ -215,7 +272,9 @@ const image: Handler = (block, walk) => {
   const loading = first ? 'fetchpriority="high"' : 'loading="lazy" decoding="async"';
   const alt = escapeHtml(plainTextOf(block, 'caption'));
   const fig = caption === '' ? '' : `<figcaption>${caption}</figcaption>`;
-  return `<figure><img src="${escapeHtml(small)}" srcset="${escapeHtml(small)} ${IMAGE_WIDTHS[0]}w, ${escapeHtml(large)} ${IMAGE_WIDTHS[1]}w" sizes="(max-width:720px) 100vw,720px" width="${Math.round(width)}" height="${Math.round(height)}" alt="${alt}" ${loading}>${fig}</figure>\n`;
+  const align = block.format.block_alignment;
+  const figClass = align === 'left' ? ' class="l"' : align === 'right' ? ' class="r"' : '';
+  return `<figure${figClass}><img src="${escapeHtml(small)}" srcset="${escapeHtml(small)} ${IMAGE_WIDTHS[0]}w, ${escapeHtml(large)} ${IMAGE_WIDTHS[1]}w" sizes="(max-width:720px) 100vw,704px" width="${Math.round(width)}" height="${Math.round(height)}" alt="${alt}" ${loading}>${fig}</figure>\n`;
 };
 
 function tableCells(
@@ -277,6 +336,40 @@ const columnList: Handler = (block, walk) => {
   return `<div class="cols">\n${inner}</div>\n`;
 };
 
+const TOC_LEVELS: Readonly<Record<string, number>> = {
+  header: 1,
+  sub_header: 2,
+  sub_sub_header: 3,
+};
+
+/** At most this many links per table of contents, and this many tables of contents per page. */
+const TOC_MAX_LINKS = 200;
+const TOC_MAX_TABLES = 3;
+/** Stands where a table of contents goes until the whole page is rendered (escaped text cannot contain it). */
+const TOC_MARK = '<!--toc-->';
+
+/**
+ * Table of contents: a marker now, links later. The links are built from the headings the body
+ * actually rendered (so every link has a target and the render cutoffs apply), which are only
+ * known once the walk is over; see `fillTocs`.
+ */
+const tableOfContents: Handler = () => `${TOC_MARK}\n`;
+
+function tocNav(headings: readonly TocHeading[]): string {
+  const links = headings
+    .slice(0, TOC_MAX_LINKS)
+    .map((h) => `<a class="l${h.level}" href="#${h.id}">${escapeHtml(h.text)}</a>`);
+  return links.length === 0 ? '' : `<nav class="toc">${links.join('')}</nav>\n`;
+}
+
+/** Replaces the markers: the first few tables of contents get the links, further ones nothing. */
+function fillTocs(html: string, headings: readonly TocHeading[]): string {
+  if (!html.includes(TOC_MARK)) return html;
+  const nav = tocNav(headings);
+  let tables = 0;
+  return html.replaceAll(`${TOC_MARK}\n`, () => (++tables <= TOC_MAX_TABLES ? nav : ''));
+}
+
 const HANDLERS: ReadonlyMap<string, Handler> = new Map<string, Handler>([
   ['text', paragraph],
   ['header', heading],
@@ -295,6 +388,7 @@ const HANDLERS: ReadonlyMap<string, Handler> = new Map<string, Handler>([
   ['table', table],
   ['column_list', columnList],
   ['page', subPage],
+  ['table_of_contents', tableOfContents],
 ]);
 
 function renderOne(id: string, walk: Walk): string {
@@ -357,11 +451,17 @@ function renderIds(ids: string[], walk: Walk): string {
 
 export function renderBlocks(map: RecordMap, ctx: BlockRenderCtx): RenderedBlocks {
   const root = map.blocks.get(ctx.rootId);
-  const shared = { blocks: 0, images: 0, firstImage: null as string | null, text: '' };
+  const shared = {
+    blocks: 0,
+    images: 0,
+    firstImage: null as string | null,
+    text: '',
+    headings: [] as TocHeading[],
+  };
   const walk: Walk = { map, ctx, path: new Set([ctx.rootId]), depth: 0, shared };
   const body = root === undefined ? '' : renderIds(root.content, walk);
   const cut = shared.blocks > MAX_BLOCKS || map.incomplete === true;
   // A page too long to show in full says so, with a way to the rest.
-  const html = cut ? `${body}${unsupportedPage(ctx)}` : body;
+  const html = fillTocs(cut ? `${body}${unsupportedPage(ctx)}` : body, shared.headings);
   return { html, firstImageBlockId: shared.firstImage, text: shared.text.trim() };
 }
