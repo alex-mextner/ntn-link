@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "ntn-link",
+  "description": "Pretty, fast share links for public Notion pages. Copy a short ntn-link with one shortcut.",
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "action": { "default_title": "Copy pretty ntn-link" },
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "commands": {
+    "copy-pretty": {
+      "suggested_key": { "default": "Ctrl+Shift+L", "mac": "MacCtrl+Shift+L" },
+      "description": "Copy pretty link"
+    },
+    "copy-fast": {
+      "suggested_key": { "default": "Ctrl+Shift+F", "mac": "MacCtrl+Shift+F" },
+      "description": "Copy fast link"
+    }
+  }
+}
