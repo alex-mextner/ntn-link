@@ -1,12 +1,14 @@
 /**
- * Generated 1200x630 card for links whose page has no social image: the ntn.link identity
- * (ink background, violet and sky glow, link glyph) around the page title. Fonts are bundled
- * (latin + cyrillic subsets of Noto Sans Bold) so rendering needs no network and Cyrillic
- * titles never fall back to tofu boxes.
+ * Generated 1200x630 card for links whose page has no cover of its own: the ntn.link identity
+ * (ink background, violet and sky glow, link glyph) around the page title, followed by the
+ * beginning of the page's text in large type, so the card says what the page is about instead
+ * of showing a generic Notion banner. Fonts are bundled (latin + cyrillic subsets of Noto Sans
+ * Bold) so rendering needs no network and Cyrillic text never falls back to tofu boxes.
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ImageResponse } from 'next/og';
+import { clip, planExcerpt, rowsNeeded } from './card-layout';
 
 // Distinct family names, chained in `fontFamily`: satori only falls back between families,
 // two subsets registered under one name leave the second one unused.
@@ -16,7 +18,17 @@ const FONT_FILES = [
 ] as const;
 const FONT_STACK = FONT_FILES.map(({ family }) => family).join(', ');
 const TITLE_MAX = 90;
-const DESCRIPTION_MAX = 140;
+
+const TITLE_SIZE = 66;
+const TITLE_LINE_HEIGHT = 1.12;
+const TITLE_ROWS = 2;
+const TEXT_SIZE = 34;
+const TEXT_LINE_HEIGHT = 1.32;
+const TEXT_ROW_EM = (1200 - 2 * 56) / TEXT_SIZE;
+const TITLE_ROW_EM = (1200 - 2 * 56) / TITLE_SIZE;
+const TEXT_ROWS = 5;
+const TEXT_ROWS_PER_LINE = 2;
+const TEXT_LINE_GAP = 12;
 
 type Font = { name: string; data: Buffer; weight: 700; style: 'normal' };
 let fonts: Promise<Font[]> | null = null;
@@ -31,11 +43,6 @@ function loadFonts(): Promise<Font[]> {
     })),
   );
   return fonts;
-}
-
-function clip(text: string, max: number): string {
-  const chars = [...text.trim()];
-  return chars.length <= max ? chars.join('') : `${chars.slice(0, max - 1).join('')}…`;
 }
 
 /** The ntn.link glyph (two interlocked chain links), the same path as app/icon.svg. */
@@ -57,12 +64,27 @@ function Glyph({ size }: { size: number }) {
   );
 }
 
+export interface TitleCardContent {
+  title: string;
+  description: string;
+  /** Leading lines of the page's text; the description stands in when there are none. */
+  excerpt: readonly string[];
+}
+
 export async function renderTitleCard(
-  title: string,
-  description: string,
+  content: TitleCardContent,
   workspace: string,
   headers: Record<string, string>,
 ): Promise<ImageResponse> {
+  const title = clip(content.title, TITLE_MAX);
+  const source = content.excerpt.length > 0 ? content.excerpt : [content.description];
+  // A title on two rows takes a text row's height from the excerpt so the frame never overflows.
+  const titleRows = rowsNeeded(title, TITLE_ROW_EM, TITLE_ROWS);
+  const lines = planExcerpt(source, {
+    rows: TEXT_ROWS - (titleRows - 1),
+    rowEm: TEXT_ROW_EM,
+    rowsPerLine: TEXT_ROWS_PER_LINE,
+  });
   return new ImageResponse(
     <div
       style={{
@@ -71,7 +93,7 @@ export async function renderTitleCard(
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
-        padding: 64,
+        padding: 56,
         // Violet glow top right, sky glow bottom left, over near-black ink.
         backgroundColor: '#0a0a12',
         backgroundImage:
@@ -85,67 +107,86 @@ export async function renderTitleCard(
           display: 'flex',
           alignItems: 'center',
           alignSelf: 'flex-start',
-          height: 44,
-          padding: '0 20px',
-          fontSize: 26,
+          height: 40,
+          padding: '0 18px',
+          fontSize: 24,
           color: '#c9c9de',
           background: 'rgba(255,255,255,0.08)',
           border: '1px solid rgba(255,255,255,0.16)',
-          borderRadius: 22,
+          borderRadius: 20,
         }}
       >
         {workspace}.notion.site
       </div>
       {/* Fixed-height regions with clipping: a long or unbroken title can never push past the
-          630 px frame or over the workspace label, whatever the glyph widths. */}
-      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+          630 px frame or over the workspace label, whatever the glyph widths. The excerpt is
+          pre-fitted to whole rows (card-layout.ts), the clipping is only a safety net. */}
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
         <div
           style={{
             display: 'flex',
             width: '100%',
-            maxHeight: 300,
+            maxHeight: TITLE_SIZE * TITLE_LINE_HEIGHT * TITLE_ROWS + 4,
             overflow: 'hidden',
-            fontSize: 64,
-            lineHeight: 1.15,
+            fontSize: TITLE_SIZE,
+            lineHeight: TITLE_LINE_HEIGHT,
             letterSpacing: -1.5,
             wordBreak: 'break-word',
           }}
         >
-          {clip(title, TITLE_MAX)}
+          {title}
         </div>
-        {description === '' ? null : (
+        {lines.length === 0 ? null : (
           <div
             style={{
               display: 'flex',
+              flexDirection: 'column',
               width: '100%',
-              maxHeight: 80,
+              maxHeight: TEXT_ROWS * TEXT_SIZE * TEXT_LINE_HEIGHT + 4 * TEXT_LINE_GAP,
               overflow: 'hidden',
-              fontSize: 30,
-              lineHeight: 1.25,
-              color: '#b4b4cc',
-              marginTop: 24,
-              wordBreak: 'break-word',
+              marginTop: 28,
+              fontSize: TEXT_SIZE,
+              lineHeight: TEXT_LINE_HEIGHT,
+              color: '#bdbdd6',
             }}
           >
-            {clip(description, DESCRIPTION_MAX)}
+            {lines.map((line, index) => (
+              <div
+                key={index}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  // Exactly the rows planned, and never shrunk by the flex column: a line that
+                  // wraps more than estimated is clipped by `lineClamp`, never drawn over its neighbour.
+                  height: Math.ceil(line.rows * TEXT_SIZE * TEXT_LINE_HEIGHT),
+                  flexShrink: 0,
+                  overflow: 'hidden',
+                  marginTop: index === 0 ? 0 : TEXT_LINE_GAP,
+                  lineClamp: line.rows,
+                  wordBreak: 'break-word',
+                }}
+              >
+                {line.text}
+              </div>
+            ))}
           </div>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', height: 44 }}>
+      <div style={{ display: 'flex', alignItems: 'center', height: 40 }}>
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: 44,
-            height: 44,
-            borderRadius: 13,
+            width: 40,
+            height: 40,
+            borderRadius: 12,
             backgroundImage: 'linear-gradient(135deg, #a99bff 0%, #5fc8f8 100%)',
           }}
         >
-          <Glyph size={26} />
+          <Glyph size={24} />
         </div>
-        <div style={{ display: 'flex', marginLeft: 14, fontSize: 30, color: '#f3f3f8' }}>
+        <div style={{ display: 'flex', marginLeft: 12, fontSize: 28, color: '#f3f3f8' }}>
           ntn
           <span style={{ color: '#8fc0ff' }}>.link</span>
         </div>

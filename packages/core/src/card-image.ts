@@ -2,8 +2,10 @@
  * Fetches the page's social image for the `/img/<ws>/<slug>` proxy. The URL handed in is
  * resolved at request time (Notion signs image URLs for 6-24 h), only allowlisted image
  * hosts are followed, and only PNG and JPEG are passed on, byte for byte (nothing is decoded
- * in our process): serving an SVG from our origin would be an XSS vector.
+ * in our process): serving an SVG from our origin would be an XSS vector. Notion's own
+ * banners are refused too (see notion-placeholder.ts), whatever URL they arrive under.
  */
+import { isNotionPlaceholderImage, isNotionPlaceholderImageUrl } from './notion-placeholder';
 import { allowNotionImageUrl, safeFetch } from './safe-fetch';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -25,6 +27,7 @@ export async function fetchCardImage(
   url: string,
   fetchImpl?: typeof fetch,
 ): Promise<FetchedImage | null> {
+  if (isNotionPlaceholderImageUrl(url)) return null;
   try {
     const result = await safeFetch(new URL(url), {
       allow: allowNotionImageUrl,
@@ -36,7 +39,10 @@ export async function fetchCardImage(
     const contentType =
       result.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? '';
     if (result.status !== 200 || result.truncated) return null;
+    // A redirect can lead from an innocent URL to a banner.
+    if (isNotionPlaceholderImageUrl(result.finalUrl.href)) return null;
     if (contentType !== 'image/png' && contentType !== 'image/jpeg') return null;
+    if (await isNotionPlaceholderImage(result.body)) return null;
     return { bytes: result.body, contentType };
   } catch {
     return null;

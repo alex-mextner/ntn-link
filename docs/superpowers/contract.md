@@ -88,7 +88,9 @@ interface CardData { title: string; description: string; imageUrl: string | null
 
 interface PreviewRequest { url: string }
 interface PreviewResponse {
-  workspace: string; pageId: string; canonicalUrl: string; card: CardData; proposedSlug: string;
+  workspace: string; pageId: string; canonicalUrl: string; card: CardData;
+  excerpt: string[]; // start of the page text for a cover-less page's generated card, else []
+  proposedSlug: string;
   namespaceClaimed: boolean; needsVerification: boolean; suggestedAction: ChallengeAction | null;
 }
 interface ChallengeRequest { url: string; action: ChallengeAction }

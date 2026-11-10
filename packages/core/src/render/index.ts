@@ -21,3 +21,5 @@ export type { FastPageInput } from './page';
 export { articleJsonLd } from './jsonld';
 export { buildFastPage, findImageBlock } from './fast-page';
 export type { FastPageResult, BuildFastPageArgs } from './fast-page';
+export { cardExcerpt, loadCardExcerpt, EXCERPT_LIMITS } from './excerpt';
+export type { LoadCardExcerptArgs } from './excerpt';

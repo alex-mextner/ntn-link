@@ -43,6 +43,7 @@ const formatSchema = z.object({
   table_block_column_header: lenient(z.boolean()),
   table_block_row_header: lenient(z.boolean()),
   display_source: lenient(z.string()),
+  page_cover: lenient(z.string()),
 });
 export type BlockFormat = z.infer<typeof formatSchema>;
 

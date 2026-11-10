@@ -152,3 +152,28 @@ export async function loadPageChunk(args: LoadPageChunkArgs): Promise<RecordMap>
   const missingLeft = await loadMissing(origin, pageId, blocks, args.fetchImpl);
   return { blocks, incomplete: incomplete || missingLeft };
 }
+
+/**
+ * Only the first chunk of a page (about 100 blocks, in reading order): enough for a card
+ * excerpt and one request instead of a full load. Nested children are not fetched.
+ */
+export async function loadPageStart(args: LoadPageChunkArgs): Promise<RecordMap> {
+  const pageId = dashedId(args.pageId);
+  const url = new URL('/api/v3/loadPageChunk', `https://${args.workspace}.notion.site`);
+  const raw = await postJson(
+    url,
+    {
+      page: { id: pageId },
+      limit: 100,
+      cursor: { stack: [] },
+      chunkNumber: 0,
+      verticalColumns: false,
+    },
+    args.fetchImpl,
+  );
+  const map = unwrapRecordMap(raw);
+  if (!map.blocks.has(pageId)) {
+    throw new NotionDataError('The Notion page is not public.', { notPublic: true });
+  }
+  return map;
+}

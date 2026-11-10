@@ -24,11 +24,17 @@ const SAMPLE: CardData = {
  */
 export function CardPreview({
   card,
+  excerpt,
   host,
+  sourceHost,
   mode,
 }: {
   card: CardData | null;
+  /** Leading lines of the page's text, shown on the generated card of a cover-less page. */
+  excerpt: readonly string[];
   host: string;
+  /** The Notion domain the generated card names, `<workspace>.notion.site`. */
+  sourceHost: string;
   mode: UnfurlMode;
 }) {
   const id = useId();
@@ -37,6 +43,11 @@ export function CardPreview({
   const image = mode === 'ready' ? safeImageUrl(shown.imageUrl) : null;
   const title = plainText(shown.title);
   const description = plainText(shown.description);
+  // The same choice the generated /img card makes: the page text, the description when empty.
+  const bodyLines = (excerpt.length > 0 ? excerpt : [description])
+    .map(plainText)
+    .filter((line) => line !== '')
+    .slice(0, 6);
 
   return (
     <div className="unfurl-block">
@@ -72,8 +83,15 @@ export function CardPreview({
               <img src={image} alt="" referrerPolicy="no-referrer" decoding="async" />
             ) : mode === 'loading' ? null : (
               <span className="unfurl-fallback">
-                <span className="unfurl-fallback-host">{host}</span>
-                <span className="unfurl-fallback-title">{title}</span>
+                <span className="unfurl-fallback-host">{sourceHost}</span>
+                <span className="unfurl-fallback-copy">
+                  <span className="unfurl-fallback-title">{title}</span>
+                  {bodyLines.map((line, index) => (
+                    <span key={index} className="unfurl-fallback-line">
+                      {line}
+                    </span>
+                  ))}
+                </span>
               </span>
             )}
           </div>

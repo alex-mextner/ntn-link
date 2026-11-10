@@ -7,6 +7,8 @@
  */
 import { ApiError } from './errors';
 import { extractMetadata, type PageMetadata } from './metadata';
+import { isNotionGeneratedCardUrl } from './notion-placeholder';
+import { dashedId, loadPageStart } from './render/page-chunk';
 import { allowNotionPageUrl, safeFetch, BOT_USER_AGENT, type SafeFetchOptions } from './safe-fetch';
 import {
   canonicalNotionUrl,
@@ -48,6 +50,25 @@ function startUrl(page: ParsedNotionUrl): URL {
     : new URL(canonicalNotionUrl(page.workspaceHint, page.pageId));
 }
 
+/**
+ * Notion's generated "Made with Notion" card is not a cover. Its URL shape is only a hint (a
+ * real cover can be uploaded under the same file name), so the page data decides: a page with
+ * a `page_cover` keeps the image; without one, or when the page data cannot be read, the
+ * image is dropped and our own card is drawn.
+ */
+async function withoutGeneratedCard(
+  metadata: PageMetadata,
+  workspace: string,
+  pageId: string,
+  fetchImpl: typeof fetch | undefined,
+): Promise<PageMetadata> {
+  if (metadata.imageUrl === null || !isNotionGeneratedCardUrl(metadata.imageUrl)) return metadata;
+  const hasCover = await loadPageStart({ workspace, pageId, fetchImpl })
+    .then((map) => (map.blocks.get(dashedId(pageId))?.format.page_cover ?? '') !== '')
+    .catch(() => false);
+  return hasCover ? metadata : { ...metadata, imageUrl: null };
+}
+
 export function createPageFetcher(options: RealPageFetcherOptions = {}): PageFetcher {
   return {
     async fetchPage(page) {
@@ -85,7 +106,12 @@ export function createPageFetcher(options: RealPageFetcherOptions = {}): PageFet
         workspace,
         pageId,
         canonicalUrl: canonicalNotionUrl(workspace, pageId),
-        metadata: extractMetadata(html),
+        metadata: await withoutGeneratedCard(
+          extractMetadata(html),
+          workspace,
+          pageId,
+          options.fetchImpl,
+        ),
       };
     },
   };

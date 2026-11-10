@@ -14,7 +14,7 @@ export const en = {
   previewHeading: 'How your link will look',
   previewPlatformsLabel: 'Preview style',
   platforms: { telegram: 'Telegram', slack: 'Slack', x: 'X' },
-  noImage: 'No image on the page: a title card is generated',
+  noImage: 'No cover on the page: a card with the title and the start of the page is generated',
   slugLabel: 'Short link path',
   slugHint: 'Lowercase letters, digits and hyphens, up to 64 characters',
   slugEmpty: 'Enter a link path',

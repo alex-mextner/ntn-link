@@ -9,6 +9,9 @@ const thsmHtml = await Bun.file(new URL('./fixtures/thsm-page.html', import.meta
 const notFoundHtml = await Bun.file(
   new URL('./fixtures/not-public-404.html', import.meta.url),
 ).text();
+const thsmChunk = await Bun.file(
+  new URL('./fixtures/thsm-loadPageChunk.json', import.meta.url),
+).json();
 const ID = '413d447ac4b180169985c93eea7f02f9';
 
 type Route = (url: URL) => Response | Promise<Response>;
@@ -35,12 +38,12 @@ describe('extractMetadata on the recorded thsm page', () => {
   test('title has no " | Notion" suffix', () => {
     expect(meta.title).toBe('Наши с Леночкой Путешествия');
   });
-  test('description, image and language', () => {
+  test('description and language', () => {
     expect(meta.description).toBe('Лето 2026 — Египет Беларусь Россия');
-    expect(meta.imageUrl).toContain('SocialMediaPreviewImage.png');
-    expect(meta.imageUrl).toContain('width=2000');
-    expect(meta.imageUrl).toContain('&id=413d447a-c4b1-8016-9985-c93eea7f02f9&'); // &amp; decoded
     expect(meta.language).toBe('ru');
+  });
+  test('Notion\u2019s generated card is kept by extraction: only the page data can tell it from a cover', () => {
+    expect(meta.imageUrl).toContain('SocialMediaPreviewImage.png');
   });
 });
 
@@ -52,6 +55,21 @@ describe('extractMetadata edge cases', () => {
     );
     expect(meta.title).toBe('Tom & "Jerry" A');
     expect(meta.imageUrl).toBeNull(); // generic Notion image means "no own image"
+  });
+  test('the white Notion logo banner (notion-wordmark.png) is no image either', () => {
+    const meta = extractMetadata(
+      `<meta property="og:title" content="Таиланд | Notion">` +
+        `<meta property="og:image" content="https://thsm.notion.site/images/meta/notion-wordmark.png">`,
+    );
+    expect(meta.imageUrl).toBeNull();
+  });
+  test('a real cover passes through with its parameters decoded', () => {
+    const cover =
+      'https://thsm.notion.site/image/https%3A%2F%2Fthsm.notion.site%2Fimages%2Fpage-cover%2Fwebb2.jpg?table=block&id=319d447a-c4b1-8094-a402-cfbe020aeea7&width=2000';
+    const meta = extractMetadata(
+      `<meta property="og:title" content="План | Notion"><meta property="og:image" content="${cover.replaceAll('&', '&amp;')}">`,
+    );
+    expect(meta.imageUrl).toBe(cover);
   });
   test('a ">" inside a quoted attribute does not cut the tag short', () => {
     const meta = extractMetadata(
@@ -82,6 +100,27 @@ describe('extractMetadata edge cases', () => {
   });
 });
 
+const CHUNK_URL = 'https://thsm.notion.site/api/v3/loadPageChunk';
+/** The recorded thsm page data, optionally with a `page_cover` on the page block. */
+function chunk(cover?: string): Response {
+  const data = structuredClone(thsmChunk);
+  const record = data.recordMap.block['413d447a-c4b1-8016-9985-c93eea7f02f9'];
+  if (cover !== undefined && record?.value?.value) record.value.value.format.page_cover = cover;
+  return Response.json(data);
+}
+
+const THSM_URL = `https://thsm.notion.site/${ID}`;
+/** Fetches the recorded thsm page; its page data carries `cover` as `page_cover` when given. */
+const fetchThsm = (cover: string | undefined) =>
+  createPageFetcher({
+    fetchImpl: fakeFetch(
+      new Map<string, Route>([
+        [THSM_URL, () => html(thsmHtml)],
+        [CHUNK_URL, () => chunk(cover)],
+      ]),
+    ),
+  }).fetchPage(parseNotionUrl(THSM_URL));
+
 describe('page fetcher: redirects and classification', () => {
   const canonical = `https://thsm.notion.site/${ID}`;
 
@@ -92,6 +131,7 @@ describe('page fetcher: redirects and classification', () => {
         new Map<string, Route>([
           [`https://www.notion.so/${ID}`, () => redirect(canonical, 301)],
           [canonical, () => html(thsmHtml)],
+          [CHUNK_URL, () => chunk()],
         ]),
         seen,
       ),
@@ -103,7 +143,34 @@ describe('page fetcher: redirects and classification', () => {
       pageId: ID,
       canonicalUrl: canonical,
     });
-    expect(seen).toEqual([`https://www.notion.so/${ID}`, canonical]);
+    expect(seen).toEqual([`https://www.notion.so/${ID}`, canonical, CHUNK_URL]);
+  });
+
+  describe('the generated "Made with Notion" card', () => {
+    test('is no image for a page without a cover', async () => {
+      expect(await fetchThsm(undefined)).toMatchObject({ metadata: { imageUrl: null } });
+    });
+
+    test('is kept when the page has a cover of its own (an upload may share the file name)', async () => {
+      const result = await fetchThsm('attachment:abc:SocialMediaPreviewImage.png');
+      expect(result).toMatchObject({
+        metadata: { imageUrl: expect.stringContaining('SocialMediaPreviewImage.png') },
+      });
+    });
+
+    test('is no image when the page data cannot be read', async () => {
+      const fetcher = createPageFetcher({
+        fetchImpl: fakeFetch(
+          new Map<string, Route>([
+            [canonical, () => html(thsmHtml)],
+            [CHUNK_URL, () => new Response('', { status: 500 })],
+          ]),
+        ),
+      });
+      expect(await fetcher.fetchPage(parseNotionUrl(canonical))).toMatchObject({
+        metadata: { imageUrl: null },
+      });
+    });
   });
 
   test('a 404 is "not public", not an error', async () => {
@@ -151,6 +218,7 @@ describe('page fetcher: redirects and classification', () => {
           [`https://internal-name.notion.site/${ID}`, () => html(notFoundHtml, 404)],
           [`https://www.notion.so/${ID}`, () => redirect(canonical, 301)],
           [canonical, () => html(thsmHtml)],
+          [CHUNK_URL, () => chunk()],
         ]),
         seen,
       ),
@@ -163,6 +231,7 @@ describe('page fetcher: redirects and classification', () => {
       `https://internal-name.notion.site/${ID}`,
       `https://www.notion.so/${ID}`,
       canonical,
+      CHUNK_URL,
     ]);
   });
 

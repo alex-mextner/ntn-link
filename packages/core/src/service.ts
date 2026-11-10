@@ -24,8 +24,10 @@ import { TtlCache } from './card-cache';
 import { ApiError } from './errors';
 import { withImageWidth } from './metadata';
 import type { PageFetcher, PageFetchResult } from './notion-fetcher';
+import { isNotionPlaceholderImageUrl } from './notion-placeholder';
 import { parseNotionUrl, canonicalNotionUrl, isUsableWorkspace } from './notion-url';
 import { renderGoneHtml, renderRedirectHtml } from './og-html';
+import { loadCardExcerpt } from './render/excerpt';
 import {
   isOwner,
   issueChallenge,
@@ -63,6 +65,11 @@ export interface ServiceDeps {
   purge?: (workspace: string, slug: string) => Promise<void>;
   /** Overrides of `DEFAULT_SWEEP_BUDGET`, mainly for tests. */
   sweepBudget?: Partial<SweepBudget>;
+  /**
+   * First lines of a page's text for the card of a page without a cover; must resolve to
+   * `[]` rather than reject. Defaults to reading them from Notion.
+   */
+  loadExcerpt?: (workspace: string, pageId: string) => Promise<string[]>;
 }
 
 /** Who is calling a link-mutating endpoint. */
@@ -74,8 +81,8 @@ export type RedirectPageResult =
   | { kind: 'not_found' };
 
 export type CardSource =
-  | { kind: 'notion-image'; url: string; title: string; description: string }
-  | { kind: 'generated'; title: string; description: string };
+  | { kind: 'notion-image'; pageId: string; url: string; title: string; description: string }
+  | { kind: 'generated'; pageId: string; title: string; description: string };
 
 /** `CreateLinkResponse` plus whether this call created the link (HTTP 201) or found it (200). */
 export interface CreateLinkOutcome extends CreateLinkResponse {
@@ -111,6 +118,12 @@ export interface Service {
    * (signed URLs expire) and reused per instance for `CARD_CACHE_TTL_MS`.
    */
   cardSource(workspace: string, slug: string): Promise<CardSource | null>;
+  /**
+   * Leading text lines of a page, drawn on the generated card. Takes the page id of the
+   * `cardSource` snapshot (not the slug), so a slug recreated for another page in between can
+   * never pair one page's title with another's text; `[]` when Notion does not answer.
+   */
+  pageExcerpt(workspace: string, pageId: string): Promise<string[]>;
   /** The stored link for the fast variant; null when missing or no longer public. */
   getLink(workspace: string, slug: string): Promise<LinkRecord | null>;
   readonly store: Store;
@@ -185,6 +198,8 @@ export function createService(deps: ServiceDeps): Service {
   const repo = new Repository(deps.store);
   const now = deps.now ?? (() => new Date());
   const purgeEdge = deps.purge ?? (async () => {});
+  const loadExcerpt =
+    deps.loadExcerpt ?? ((workspace, pageId) => loadCardExcerpt({ workspace, pageId }));
   // The image URL Notion currently serves for a link; memory only, never stored (it is signed
   // and expires). Resolved per page id, so a recreated slug never inherits it.
   const cardImages = new TtlCache<string | null>({
@@ -347,6 +362,7 @@ export function createService(deps: ServiceDeps): Service {
           imageUrl: meta.imageUrl === null ? null : withImageWidth(meta.imageUrl, CARD_IMAGE_WIDTH),
           language: meta.language,
         },
+        excerpt: meta.imageUrl === null ? await loadExcerpt(page.workspace, page.pageId) : [],
         proposedSlug: await proposeSlug(page.workspace, meta.title),
         namespaceClaimed: claimed,
         needsVerification: !owner,
@@ -512,16 +528,24 @@ export function createService(deps: ServiceDeps): Service {
         const stillHere = fresh.kind === 'public' && fresh.workspace === record.workspace;
         return { value: stillHere ? fresh.metadata.imageUrl : null, cacheable: true };
       });
-      if (imageUrl === null || record.goneAt !== null) {
-        return { kind: 'generated', title: card.title, description: card.description };
+      if (imageUrl === null || isNotionPlaceholderImageUrl(imageUrl) || record.goneAt !== null) {
+        return {
+          kind: 'generated',
+          pageId: record.pageId,
+          title: card.title,
+          description: card.description,
+        };
       }
       return {
         kind: 'notion-image',
+        pageId: record.pageId,
         url: withImageWidth(imageUrl, CARD_IMAGE_WIDTH),
         title: card.title,
         description: card.description,
       };
     },
+
+    pageExcerpt: (workspace, pageId) => loadExcerpt(workspace, pageId),
 
     async getLink(workspace, slug) {
       const record = await repo.getLink(workspace, slug);
