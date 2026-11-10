@@ -125,6 +125,7 @@ export function startFakeServer(): FakeServer {
       canonicalUrl: b['url'],
       card: card(titleOf(b['url'])),
       excerpt: [],
+      icon: null,
       proposedSlug: slugOf(titleOf(b['url'])),
       namespaceClaimed: claimed,
       needsVerification: true,

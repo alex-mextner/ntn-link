@@ -11,6 +11,7 @@
  */
 import type {
   CardData,
+  CardIcon,
   ChallengeAction,
   LinkView,
   PreviewResponse,
@@ -303,6 +304,9 @@ export function previewCard(state: FlowState): CardData | null {
     description: state.description.trim() || card.description,
   };
 }
+
+/** The page icon of the preview, for the generated card's mirror; null before there is one. */
+export const previewIcon = (state: FlowState): CardIcon | null => state.preview?.icon ?? null;
 
 /**
  * The error to show next to the URL field: URL-scoped errors, and any error while there is no

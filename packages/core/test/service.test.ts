@@ -187,21 +187,30 @@ describe('preview', () => {
 
   test('a page without a cover carries the start of its text for the generated card', async () => {
     h.excerpts.set(`thsm/${id(2)}`, ['Day one', '• Pack the bags']);
+    h.icons.set(`thsm/${id(2)}`, { kind: 'emoji', emoji: '🤿' });
     const p = await h.service.preview({ url: pageUrl('thsm', 2) }, key);
     expect(p.card.imageUrl).toBeNull();
     expect(p.excerpt).toEqual(['Day one', '• Pack the bags']);
+    expect(p.icon).toEqual({ kind: 'emoji', emoji: '🤿' });
   });
 
-  test('a page with its own cover carries no excerpt, and the page text is not even loaded', async () => {
+  test('a page without an icon previews with icon null', async () => {
+    const p = await h.service.preview({ url: pageUrl('thsm', 2) }, key);
+    expect(p.icon).toBeNull();
+  });
+
+  test('a page with its own cover carries no excerpt or icon, and the page is not even loaded', async () => {
     h.notion.add(id(6), {
       workspace: 'thsm',
       title: 'With cover',
       imageUrl: 'https://thsm.notion.site/image/x?table=block&width=2000',
     });
     h.excerpts.set(`thsm/${id(6)}`, ['must not appear']);
+    h.icons.set(`thsm/${id(6)}`, { kind: 'emoji', emoji: '🤿' });
     const p = await h.service.preview({ url: pageUrl('thsm', 6) }, key);
     expect(p.card.imageUrl).toContain('/image/x');
     expect(p.excerpt).toEqual([]);
+    expect(p.icon).toBeNull();
   });
 });
 
@@ -280,6 +289,38 @@ describe('redirect page and lifecycle', () => {
     expect(page.html).toContain('content="https://ntn.test/img/thsm/trips"');
     expect(page.needsRefresh).toBe(false);
   });
+
+  test("the redirect page shows the page's emoji icon, and not a picture icon", async () => {
+    await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'trips' }, key);
+    h.icons.set(`thsm/${id(1)}`, { kind: 'emoji', emoji: '🤿' });
+    const withEmoji = await h.service.redirectPage('thsm', 'trips');
+    if (withEmoji.kind !== 'page') throw new Error(withEmoji.kind);
+    expect(withEmoji.html).toContain('<span class="m e" aria-hidden="true">🤿</span>');
+    h.icons.set(`thsm/${id(1)}`, { kind: 'image', dataUri: 'data:image/png;base64,AAAA' });
+    const withPicture = await h.service.redirectPage('thsm', 'trips');
+    if (withPicture.kind !== 'page') throw new Error(withPicture.kind);
+    expect(withPicture.html).not.toContain('class="m e"');
+    expect(withPicture.html).not.toContain('data:image/png');
+  });
+
+  test.each([
+    ['never answers', () => new Promise<string | null>(() => {})],
+    ['rejects', () => Promise.reject(new Error('notion down'))],
+  ])(
+    'a lookup that %s still serves the stub, without the icon, within the deadline',
+    async (_name, loadPageEmoji) => {
+      const slow = harness({ loadPageEmoji });
+      slow.notion.add(id(1), { workspace: 'thsm', title: 'T' });
+      const slowKey = await claim(slow, 'thsm', 1);
+      await slow.service.createLink({ url: pageUrl('thsm', 1), slug: 'trips' }, slowKey);
+      const started = Date.now();
+      const page = await slow.service.redirectPage('thsm', 'trips');
+      if (page.kind !== 'page') throw new Error(page.kind);
+      expect(Date.now() - started).toBeLessThan(2500);
+      expect(page.html).not.toContain('class="m e"');
+      expect(page.html).toContain('<meta property="og:title" content="T">');
+    },
+  );
 
   test('hostile Notion text is escaped in the served page', async () => {
     h.notion.add(id(5), {
@@ -387,16 +428,21 @@ describe('card source', () => {
     expect(await h.service.cardSource('thsm', 'legacy')).toMatchObject({ kind: 'generated' });
   });
 
-  test('the excerpt is read for the page id of the card source, never for whatever the slug is now', async () => {
+  test('the card page is read for the page id of the card source, never for whatever the slug is now', async () => {
     await h.service.createLink({ url: pageUrl('thsm', 2), slug: 'noimg' }, key);
     h.excerpts.set(`thsm/${id(2)}`, ['Text of page A']);
     h.excerpts.set(`thsm/${id(1)}`, ['Text of page B']);
+    h.icons.set(`thsm/${id(2)}`, { kind: 'emoji', emoji: '🤿' });
+    h.icons.set(`thsm/${id(1)}`, { kind: 'emoji', emoji: '🛕' });
     const source = await h.service.cardSource('thsm', 'noimg');
-    // The slug is deleted and recreated for another page before the excerpt is read.
+    // The slug is deleted and recreated for another page before the page content is read.
     await h.service.deleteLink('thsm', 'noimg', { kind: 'owner', ownerKey: key });
     await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'noimg' }, key);
     expect(source).toMatchObject({ kind: 'generated', pageId: id(2) });
-    expect(await h.service.pageExcerpt('thsm', source?.pageId ?? '')).toEqual(['Text of page A']);
+    expect(await h.service.pageCard('thsm', source?.pageId ?? '')).toEqual({
+      excerpt: ['Text of page A'],
+      icon: { kind: 'emoji', emoji: '🤿' },
+    });
   });
 
   test('uses the freshly resolved Notion image at width 1200, or a generated card without one', async () => {
