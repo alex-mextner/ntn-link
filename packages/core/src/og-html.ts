@@ -5,6 +5,7 @@
  * descriptions are attacker-controlled. The redirect target is passed in by the caller
  * and is always the canonical URL the server rebuilt, never user input.
  */
+import { FAVICON_SVG, LOGO_PATH, LOGO_STROKE, LOGO_VIEWBOX } from './brand';
 import { ogLocale } from './metadata';
 
 const HTML_ESCAPES: ReadonlyMap<string, string> = new Map([
@@ -31,31 +32,27 @@ function scriptString(text: string): string {
 
 /**
  * Inline chrome for the two stub pages: one centred message in the ntn.link look (ink
- * background with a violet glow, gradient link mark), light or dark by `prefers-color-scheme`.
+ * background with a violet glow, the logo above it), light or dark by `prefers-color-scheme`.
  * No `url()`, no web fonts and no script, so the stub can never trigger a request of its own.
  */
 const STUB_CSS = [
-  ':root{color-scheme:dark light;--bg:#07070c;--fg:#f3f3f8;--mut:#a3a3b8;--ac:#a99bff;--g:linear-gradient(135deg,#a99bff,#5fc8f8);--ink:#0b0b14}',
-  '@media(prefers-color-scheme:light){:root{--bg:#f6f6fb;--fg:#14141f;--mut:#54546c;--ac:#4338ca;--g:linear-gradient(135deg,#4f46e5,#2563eb);--ink:#fff}}',
+  ':root{color-scheme:dark light;--bg:#07070c;--fg:#f3f3f8;--mut:#a3a3b8;--ac:#a99bff}',
+  '@media(prefers-color-scheme:light){:root{--bg:#f6f6fb;--fg:#14141f;--mut:#54546c;--ac:#4338ca}}',
   '*{box-sizing:border-box}',
   'body{margin:0;min-height:100vh;display:grid;place-items:center;padding:1.5rem;background:radial-gradient(40rem 26rem at 10% -10%,rgba(124,92,255,.28),transparent 62%),radial-gradient(34rem 24rem at 100% 0,rgba(56,189,248,.16),transparent 58%),var(--bg);color:var(--fg);font:1rem/1.55 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;text-align:center}',
   'main{max-width:28rem}',
-  '.m{display:grid;place-items:center;width:3rem;height:3rem;margin:0 auto 1.25rem;border-radius:.9rem;background:var(--g);color:var(--ink)}',
-  '.m.e{width:auto;height:auto;border-radius:0;background:none;font-size:3.5rem;line-height:1;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}',
+  '.m{display:grid;place-items:center;width:3rem;height:3rem;margin:0 auto 1.25rem;color:var(--fg)}',
+  '.m.e{width:auto;height:auto;font-size:3.5rem;line-height:1;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}',
   'h1{margin:0 0 .5rem;font-size:1.625rem;line-height:1.2;letter-spacing:-.025em}',
   'p{margin:.5rem 0;color:var(--mut)}',
   'a{color:var(--ac);font-weight:600;text-underline-offset:.2em}',
 ].join('');
 
-/** The ntn.link link glyph, drawn inline so the stub stays one self-contained document. */
-const MARK =
-  '<span class="m" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5"/></svg></span>';
-
-const FAVICON_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#9a8cff"/><g fill="none" stroke="#0b0b14" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" transform="translate(5 5) scale(.9167)"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5"/></g></svg>';
+/** The fastp.ge logo, drawn inline so the stub stays one self-contained document. */
+const MARK = `<span class="m" aria-hidden="true"><svg width="48" height="48" viewBox="${LOGO_VIEWBOX}" fill="currentColor" stroke="currentColor" stroke-width="${LOGO_STROKE}" stroke-linejoin="round"><path fill-rule="evenodd" d="${LOGO_PATH}"/></svg></span>`;
 
 /**
- * The ntn.link icon as a data URI (base64, so the markup carries no foreign URL): stub and
+ * The logo as a tab icon in a data URI (base64, so the markup carries no foreign URL): stub and
  * fast pages show the brand in the tab without the browser requesting `/favicon.ico`.
  */
 export const FAVICON_LINK = `<link rel="icon" href="data:image/svg+xml;base64,${Buffer.from(FAVICON_SVG).toString('base64')}">`;
@@ -80,7 +77,7 @@ export interface RedirectPageInput {
   /** Canonical Notion URL humans are sent to. */
   targetUrl: string;
   language: string | null;
-  /** The page's emoji icon, shown in place of the ntn.link mark and as the tab icon; null when it has none. */
+  /** The page's emoji icon, shown in place of the logo mark and as the tab icon; null when it has none. */
   emoji: string | null;
 }
 
@@ -108,7 +105,7 @@ export function renderRedirectHtml(input: RedirectPageInput): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
-${input.emoji === null ? '' : `${emojiFaviconLink(input.emoji)}\n`}${tags.join('\n')}
+${input.emoji === null ? FAVICON_LINK : emojiFaviconLink(input.emoji)}\n${tags.join('\n')}
 <meta http-equiv="refresh" content="0;url=${target}">
 <style>${STUB_CSS}</style>
 <script>location.replace(${scriptString(input.targetUrl)})</script>

@@ -1,6 +1,6 @@
 /**
- * Generated 1200x630 card for links whose page has no cover of its own: the ntn.link identity
- * (ink background, violet and sky glow, link glyph) around the page title, followed by the
+ * Generated 1200x630 card for links whose page has no cover of its own: the product identity
+ * (ink background, violet and sky glow, the logo) around the page title, followed by the
  * beginning of the page's text in large type, so the card says what the page is about instead
  * of showing a generic Notion banner. Fonts are bundled (latin + cyrillic subsets of Noto Sans
  * Bold) so rendering needs no network and Cyrillic text never falls back to tofu boxes.
@@ -8,6 +8,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CardIcon } from '@ntn-link/core';
+import { LOGO_PATH, LOGO_STROKE, LOGO_VIEWBOX } from '@ntn-link/core/brand';
 import { ImageResponse } from 'next/og';
 import { emojiDataUri } from './emoji-picture';
 import {
@@ -32,6 +33,9 @@ const TEXT_SIZE = CARD_TEXT_SIZE;
 const TEXT_LINE_HEIGHT = 1.32;
 const TEXT_ROWS = 5;
 const TEXT_LINE_GAP = 12;
+/** The footer row stays 40 px tall; the larger logo overflows it evenly, so the text area above is unchanged. */
+const FOOTER_ROW = 40;
+const FOOTER_LOGO_SIZE = 56;
 
 type Font = { name: string; data: Buffer; weight: 700; style: 'normal' };
 let fonts: Promise<Font[]> | null = null;
@@ -48,21 +52,22 @@ function loadFonts(): Promise<Font[]> {
   return fonts;
 }
 
-/** The ntn.link glyph (two interlocked chain links), the same path as app/icon.svg. */
-function Glyph({ size }: { size: number }) {
+/** The logo in the footer: the same path as the web header, light on the dark card. */
+function Logo() {
   return (
     <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="#0b0b14"
-      strokeWidth="2.4"
-      strokeLinecap="round"
+      width={FOOTER_LOGO_SIZE}
+      height={FOOTER_LOGO_SIZE}
+      viewBox={LOGO_VIEWBOX}
+      fill="#f3f3f8"
+      // A hairline of the hand-drawn line would blur at this size: thicken it a little.
+      stroke="#f3f3f8"
+      strokeWidth={LOGO_STROKE}
       strokeLinejoin="round"
+      // Taller than the 40 px row: negative margins keep the row's height, so nothing above moves.
+      style={{ margin: `${(FOOTER_ROW - FOOTER_LOGO_SIZE) / 2}px 0` }}
     >
-      <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
-      <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+      <path fillRule="evenodd" d={LOGO_PATH} />
     </svg>
   );
 }
@@ -209,21 +214,9 @@ export async function renderTitleCard(
           </div>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', height: 40 }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 40,
-            height: 40,
-            borderRadius: 12,
-            backgroundImage: 'linear-gradient(135deg, #a99bff 0%, #5fc8f8 100%)',
-          }}
-        >
-          <Glyph size={24} />
-        </div>
-        <div style={{ display: 'flex', marginLeft: 12, fontSize: 28, color: '#f3f3f8' }}>
+      <div style={{ display: 'flex', alignItems: 'center', height: FOOTER_ROW }}>
+        <Logo />
+        <div style={{ display: 'flex', marginLeft: 10, fontSize: 28, color: '#f3f3f8' }}>
           ntn
           <span style={{ color: '#8fc0ff' }}>.link</span>
         </div>

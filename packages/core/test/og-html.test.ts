@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { escapeHtml, renderGoneHtml, renderRedirectHtml } from '../src/og-html';
+import { escapeHtml, FAVICON_LINK, renderGoneHtml, renderRedirectHtml } from '../src/og-html';
 
 const hostile = `</title><script>alert("x")</script> & 'q' "d" \u2028`;
 const base = {
@@ -65,19 +65,19 @@ describe('renderRedirectHtml', () => {
 describe('redirect page icon', () => {
   const iconed = renderRedirectHtml({ ...base, emoji: '🤿' });
 
-  test('an emoji icon replaces the ntn.link mark and becomes the tab icon', () => {
+  test('an emoji icon replaces the logo mark and becomes the tab icon', () => {
     expect(iconed).toContain('<span class="m e" aria-hidden="true">🤿</span>');
-    expect(iconed).not.toContain('<svg width="24"');
+    expect(iconed).not.toContain('<svg width="48"');
     const favicon = /<link rel="icon" href="data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)">/.exec(
       iconed,
     )?.[1];
     expect(Buffer.from(favicon ?? '', 'base64').toString('utf8')).toContain('>🤿</text>');
   });
 
-  test('no icon keeps the ntn.link mark and adds no favicon', () => {
+  test('no icon keeps the logo mark and the logo as the tab icon', () => {
     const plain = renderRedirectHtml(base);
-    expect(plain).toContain('<svg width="24"');
-    expect(plain).not.toContain('rel="icon"');
+    expect(plain).toContain('<svg width="48"');
+    expect(plain).toContain(FAVICON_LINK);
   });
 
   test('the emoji is escaped', () => {
