@@ -17,6 +17,12 @@ import {
 } from '@ntn-link/core/render';
 import { getService, linkCacheTag } from '@/lib/service';
 
+/**
+ * Room for the 10 s database warm-up (Neon scale-to-zero, see PostgresStore) plus paging
+ * through Notion chunks (up to 40 sequential requests with their own deadlines).
+ */
+export const maxDuration = 60;
+
 const IMAGE_CACHE_CONTROL = 'public, max-age=86400, s-maxage=2592000, immutable';
 const ERROR_CACHE_CONTROL = 'public, max-age=0, s-maxage=30';
 const BLOCK_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

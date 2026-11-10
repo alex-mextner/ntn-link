@@ -15,13 +15,14 @@ export interface SqlHarness extends StoreHarness {
   sql: (text: string, ...params: SqlParam[]) => Promise<readonly SqlRow[]>;
 }
 
-export function sqlHarness(executor: SqlExecutor): SqlHarness {
+export function sqlHarness(executor: SqlExecutor, maxParallelism?: number): SqlHarness {
   const keyPrefix = `ntnlinktest:${randomBytes(6).toString('hex')}:`;
   const like = `%${keyPrefix}%`;
   const sql = (text: string, ...params: SqlParam[]): Promise<readonly SqlRow[]> =>
     executor.query({ text, params }, AbortSignal.timeout(STATEMENT_DEADLINE_MS));
   return {
     store: new PostgresStore({ executor }),
+    ...(maxParallelism === undefined ? {} : { maxParallelism }),
     keyPrefix,
     sql,
     advanceSeconds: async (seconds) => {

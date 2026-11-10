@@ -1,6 +1,0 @@
-version: 1
-backend: tasks
-tasks:
-  url: https://tasks.glide.vc
-  team: UB
-  attachment_mode: native
