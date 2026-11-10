@@ -86,14 +86,33 @@ as a hash inside expiring counters) come from `X-Forwarded-For` where that heade
 
 Public routes:
 
-| Route                   | Response                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /<ws>/<slug>`      | `200` HTML with OG tags and refresh to Notion (`410` once the Notion page is no longer public, `404` unknown). `Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400`, tagged `ntn-<ws>-<slug>` via `Vercel-Cache-Tag`; stale cards are refreshed in the background after 24 h                                                                                                                                                       |
-| `GET /<ws>/<slug>/read` | Fast copy of the page (static HTML)                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `GET /img/<ws>/<slug>`  | Card image: the page's own cover (PNG or JPEG, passed through unchanged, 1200 px wide requested) fetched fresh from Notion at request time (signed URLs expire, so only the bytes are CDN-cached). Notion's generic banners (the white "Notion" logo, the "Made with Notion" card) are never served: a page without a cover gets a generated 1200x630 card with its title and the beginning of its text in large type (bundled Noto Sans, Cyrillic supported) |
+| Route                   | Response                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /<ws>/<slug>`      | `200` HTML with OG tags and refresh to Notion (`410` once the Notion page is no longer public, `404` unknown). `Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400`, tagged `ntn-<ws>-<slug>` via `Vercel-Cache-Tag`; stale cards are refreshed in the background after 24 h                                                                                                                                                                                                                                                       |
+| `GET /<ws>/<slug>/read` | Fast copy of the page (static HTML)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `GET /img/<ws>/<slug>`  | Card image: the page's own cover (PNG or JPEG, passed through unchanged, 1200 px wide requested) fetched fresh from Notion at request time (signed URLs expire, so only the bytes are CDN-cached). Notion's generic banners (the white "Notion" logo, the "Made with Notion" card) are never served: a page without a cover gets a generated 1200x630 card with the page's icon (an emoji drawn as a Twemoji picture, or the icon picture as a rounded square), its title and the beginning of its text in large type (bundled Noto Sans, Cyrillic supported) |
+
+Emoji on the generated card are [Twemoji](https://github.com/jdecked/twemoji) graphics (Copyright 2020 Twitter, Inc and other contributors, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/), shipped unmodified via `@twemoji/svg`; licence text in `apps/web/assets/emoji/`). They are not Apple's emoji: that artwork is proprietary and may not be redistributed in a PNG, so the card cannot have the iOS look (see the design spec, section 5.2). HTML surfaces (`/read`, the web preview) use the emoji as text, which Apple devices draw in Apple's own style.
 
 Link changes purge the CDN by cache tag on Vercel (`dangerouslyDeleteByTag`) and revalidate the
 `/read` path; elsewhere the purge is a no-op.
+
+### Cards that change, and preview caches of messengers
+
+The `og:image` of a link (and of its `/read` copy) is `/img/<ws>/<slug>?v=<version>`. The version
+is a short digest of the card render version (`CARD_RENDER_VERSION` in
+`packages/core/src/card-version.ts`, bumped whenever the look of the card changes), the effective
+title and description, the cover, and, for a page without a cover, a digest of the opening text
+and the icon drawn on its card (stored on create and on every refresh). A changed card therefore gets a new
+image URL: crawlers that read the page again fetch the new image instead of reusing one cached
+under the old URL, and the CDN keeps one entry per version. `?v=` is ignored by the route itself.
+
+Telegram, Slack, Facebook and others keep their own preview of an already shared URL. That
+cache cannot be cleared from this service: a link shared before a card change keeps its old
+preview until the messenger decides to read the page again. For Telegram, send the link to
+[@WebpageBot](https://t.me/WebpageBot) to make it re-read the page; messages posted afterwards
+show the refreshed preview, messages already posted keep what they showed. Creating a second
+link (another slug) to the same page always starts with a clean preview.
 
 ## The `NTN_TEST_FETCHER` caveat
 

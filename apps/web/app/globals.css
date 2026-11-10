@@ -1078,8 +1078,35 @@ textarea.input {
     linear-gradient(135deg, #15152a, #0a0a12);
 }
 
-.unfurl-fallback-host {
+/* The workspace label with the page icon in front, as the card draws them (96 px over 1200). */
+.unfurl-fallback-top {
+  display: flex;
+  align-items: center;
   align-self: flex-start;
+  gap: 2cqi;
+}
+
+.unfurl-media .unfurl-fallback-icon {
+  flex: none;
+  width: 8cqi;
+  height: 8cqi;
+}
+
+.unfurl-media .unfurl-fallback-icon[data-kind='image'] {
+  border-radius: 1.67cqi;
+  object-fit: cover;
+}
+
+/* An emoji is text: the viewer's own emoji font draws it (Apple's on iOS and macOS). */
+.unfurl-media .unfurl-fallback-icon[data-kind='emoji'] {
+  display: grid;
+  place-items: center;
+  font-size: 6.4cqi;
+  line-height: 1;
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+}
+
+.unfurl-fallback-host {
   padding: 0.6cqi 1.5cqi;
   font-family: var(--mono);
   font-size: 2cqi;

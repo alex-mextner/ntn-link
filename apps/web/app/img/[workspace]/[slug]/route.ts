@@ -2,6 +2,8 @@
  * Card image of a link. Notion image URLs are signed and expire within hours, so the
  * source is resolved fresh on every request that misses the CDN and only the image bytes
  * are cached, never the signed URL. Without a usable Notion image the title card is drawn.
+ * The `?v=` the pages append (`cardImageVersion`) is not read here: it only gives every card
+ * version its own URL, so unfurlers and the CDN cannot keep serving an older card.
  */
 import { fetchCardImage } from '@ntn-link/core';
 import { errorResponse } from '@/lib/http';
@@ -46,8 +48,8 @@ export async function GET(
         });
       }
     }
-    const excerpt = await getService().pageExcerpt(workspace, source.pageId);
-    return await renderTitleCard({ ...source, excerpt }, workspace, headers);
+    const { excerpt, icon } = await getService().pageCard(workspace, source.pageId);
+    return await renderTitleCard({ ...source, excerpt, icon }, workspace, headers);
   } catch (error) {
     return errorResponse(error);
   }

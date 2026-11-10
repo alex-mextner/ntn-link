@@ -1,6 +1,7 @@
 /** Markup that carries the Notion look: colours, hero (cover and icon), blank lines, callouts. */
 import { describe, expect, test } from 'bun:test';
 import {
+  CRITICAL_CSS,
   renderBlocks,
   renderFastPage,
   pageImageSourceOf,
@@ -114,6 +115,21 @@ describe('page cover and icon sources', () => {
   });
 });
 
+const heroOf = (icon: PageHero['icon']): PageHero => ({
+  icon,
+  cover: null,
+  fullWidth: false,
+  smallText: false,
+  font: 'sans',
+});
+
+const faviconSvg = (out: string): string => {
+  const encoded = /<link rel="icon" href="data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)">/.exec(
+    out,
+  )?.[1];
+  return Buffer.from(encoded ?? '', 'base64').toString('utf8');
+};
+
 describe('renderFastPage hero', () => {
   const body = renderBlocks(unwrapRecordMap({ recordMap: { block: {} } }), testCtx());
   const input = (hero: PageHero): FastPageInput => ({
@@ -158,5 +174,27 @@ describe('renderFastPage hero', () => {
     expect(out).toContain('<body>');
     expect(out).not.toContain('class="cv"');
     expect(out).not.toContain('class="pi');
+  });
+
+  test('an emoji icon is also the tab icon, drawn by the emoji font with Apple first', () => {
+    const svg = faviconSvg(renderFastPage(input(heroOf({ kind: 'emoji', text: '🤿' }))));
+    expect(svg).toContain('>🤿</text>');
+    expect(svg).toMatch(/font-family="Apple Color Emoji,/);
+    // The hero itself prefers Apple Color Emoji too.
+    expect(CRITICAL_CSS).toMatch(/\.pi\{[^}]*font-family:"Apple Color Emoji"/);
+  });
+
+  test('an emoji cannot break out of the favicon SVG', () => {
+    const svg = faviconSvg(renderFastPage(input(heroOf({ kind: 'emoji', text: '<&">' }))));
+    expect(svg).toContain('&lt;&amp;&quot;&gt;</text>');
+    expect(svg).not.toContain('<&');
+  });
+
+  test('a picture icon or none keeps the ntn.link favicon, with no request of its own', () => {
+    const brand = faviconSvg(renderFastPage(input(heroOf(null))));
+    expect(brand).toContain('<rect');
+    expect(brand).not.toContain('<text');
+    const picture = faviconSvg(renderFastPage(input(heroOf({ kind: 'image', image }))));
+    expect(picture).toBe(brand);
   });
 });

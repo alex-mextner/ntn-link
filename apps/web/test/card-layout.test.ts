@@ -61,15 +61,28 @@ describe('planExcerpt', () => {
 
 describe('planCardText', () => {
   test('is what both the card and its preview show: clipped title, planned lines, description fallback', () => {
-    const plan = planCardText('Title', ['one', 'two', 'three', 'four', 'five', 'six'], 'desc');
+    const plan = planCardText(
+      'Title',
+      ['one', 'two', 'three', 'four', 'five', 'six'],
+      'desc',
+      false,
+    );
     expect(plan.title).toBe('Title');
     expect(plan.lines.map((line) => line.text)).toEqual(['one', 'two', 'three', 'four', 'five']);
-    expect(planCardText('Title', [], 'desc').lines.map((line) => line.text)).toEqual(['desc']);
+    expect(planCardText('Title', [], 'desc', false).lines.map((line) => line.text)).toEqual([
+      'desc',
+    ]);
   });
 
   test('a title on two rows leaves one text row less', () => {
     const long = 'Wide title '.repeat(8);
-    const plan = planCardText(long, ['a', 'b', 'c', 'd', 'e'], '');
+    const plan = planCardText(long, ['a', 'b', 'c', 'd', 'e'], '', false);
     expect(plan.lines).toHaveLength(4);
+  });
+
+  test('the icon row above the title takes one text row, also under a two-row title', () => {
+    const five = ['a', 'b', 'c', 'd', 'e'];
+    expect(planCardText('Title', five, '', true).lines).toHaveLength(4);
+    expect(planCardText('Wide title '.repeat(8), five, '', true).lines).toHaveLength(3);
   });
 });

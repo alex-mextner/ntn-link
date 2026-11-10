@@ -86,10 +86,12 @@ type CanonicalMode = 'self' | 'notion';
 interface TextOverrides { title?: string; description?: string }
 interface CardData { title: string; description: string; imageUrl: string | null; language: string | null }
 
+type CardIcon = { kind: 'emoji'; emoji: string } | { kind: 'image'; dataUri: string }; // data:image/png|jpeg;base64,...
 interface PreviewRequest { url: string }
 interface PreviewResponse {
   workspace: string; pageId: string; canonicalUrl: string; card: CardData;
   excerpt: string[]; // start of the page text for a cover-less page's generated card, else []
+  icon: CardIcon | null; // the page's icon for a cover-less page's generated card, else null
   proposedSlug: string;
   namespaceClaimed: boolean; needsVerification: boolean; suggestedAction: ChallengeAction | null;
 }

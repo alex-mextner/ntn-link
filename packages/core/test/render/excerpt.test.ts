@@ -1,12 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  EXCERPT_LIMITS,
-  cardExcerpt,
-  dashedId,
-  loadCardExcerpt,
-  unwrapRecordMap,
-} from '../../src/render';
-import { ROOT, THSM_ID, bid, fakeNotion, mapOf, pageWith, readFixture, WS } from './helpers';
+import { EXCERPT_LIMITS, cardExcerpt, unwrapRecordMap } from '../../src/render';
+import { ROOT, THSM_ID, bid, mapOf, pageWith, readFixture } from './helpers';
 
 const text = (value: string) => ({ type: 'text', properties: { title: [[value]] } });
 
@@ -96,24 +90,5 @@ describe('cardExcerpt', () => {
       'Гениальный план на жизнь',
       'Осень 2026 — Черногория',
     ]);
-  });
-});
-
-describe('loadCardExcerpt', () => {
-  test('asks Notion for the first chunk only and returns the page text', async () => {
-    const chunk = readFixture('thsm-loadPageChunk.json');
-    const { impl, requests } = fakeNotion([chunk]);
-    const lines = await loadCardExcerpt({ workspace: WS, pageId: THSM_ID, fetchImpl: impl });
-    expect(lines[0]).toBe('Лето 2026 — Египет Беларусь Россия');
-    expect(requests).toHaveLength(1);
-    expect(requests[0]?.body).toMatchObject({ chunkNumber: 0, page: { id: dashedId(THSM_ID) } });
-  });
-
-  test('any failure yields no lines instead of an error', async () => {
-    const { impl } = fakeNotion([]);
-    expect(await loadCardExcerpt({ workspace: WS, pageId: THSM_ID, fetchImpl: impl })).toEqual([]);
-    expect(await loadCardExcerpt({ workspace: WS, pageId: 'not-an-id', fetchImpl: impl })).toEqual(
-      [],
-    );
   });
 });

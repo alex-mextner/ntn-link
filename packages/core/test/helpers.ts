@@ -4,12 +4,13 @@
  * hint that is not the published domain still resolves by page id (the real fetcher falls
  * back to `www.notion.so/<id>`), and titles can be edited between calls.
  */
+import type { CardIcon } from '../src/api-types';
 import { ApiError } from '../src/errors';
 import { extractMetadata } from '../src/metadata';
 import { MemoryStore } from '../src/memory-store';
 import type { PageFetcher, PageFetchResult } from '../src/notion-fetcher';
 import { canonicalNotionUrl, type ParsedNotionUrl } from '../src/notion-url';
-import { createService, type Service } from '../src/service';
+import { createService, type Service, type ServiceDeps } from '../src/service';
 
 export interface FakePage {
   workspace: string;
@@ -71,14 +72,17 @@ export interface Harness {
   purged: string[];
   /** Page text lines the stubbed card excerpt loader returns, by `<workspace>/<pageId>`; default none. */
   excerpts: Map<string, string[]>;
+  /** Icon the stubbed card page loader returns, by `<workspace>/<pageId>`; default none. */
+  icons: Map<string, CardIcon>;
 }
 
-export function harness(): Harness {
+export function harness(overrides: Partial<ServiceDeps> = {}): Harness {
   const notion = new FakeNotion();
   const clock = new Clock();
   const store = new MemoryStore(clock.ms);
   const purged: string[] = [];
   const excerpts = new Map<string, string[]>();
+  const icons = new Map<string, CardIcon>();
   const service = createService({
     store,
     fetcher: notion,
@@ -87,9 +91,17 @@ export function harness(): Harness {
     purge: async (ws, slug) => {
       purged.push(`${ws}/${slug}`);
     },
-    loadExcerpt: async (workspace, pageId) => excerpts.get(`${workspace}/${pageId}`) ?? [],
+    loadCardPage: async (workspace, pageId) => ({
+      excerpt: excerpts.get(`${workspace}/${pageId}`) ?? [],
+      icon: icons.get(`${workspace}/${pageId}`) ?? null,
+    }),
+    loadPageEmoji: async (workspace, pageId) => {
+      const icon = icons.get(`${workspace}/${pageId}`);
+      return icon?.kind === 'emoji' ? icon.emoji : null;
+    },
+    ...overrides,
   });
-  return { notion, clock, store, service, purged, excerpts };
+  return { notion, clock, store, service, purged, excerpts, icons };
 }
 
 /** Runs the whole claim flow for a workspace and returns its owner key. */
