@@ -28,6 +28,9 @@ bun run typecheck    # whole workspace
 bun run lint
 bun run build        # next build --webpack
 bun run smoke:notion # opt-in live check of Notion's page shape (network)
+bun run test:redis    # opt-in: store contract on a real Redis (docker)
+bun run test:postgres # opt-in: store contract on a real Postgres (docker), true concurrency
+DATABASE_URL=... bun run test:neon  # opt-in: store contract on the real Neon database (unique key prefix, cleaned up)
 ```
 
 Next is run with `--webpack` because Turbopack 16.4 cannot resolve `react/jsx-runtime` through
@@ -38,13 +41,15 @@ Bun's isolated install layout in this workspace.
 | Variable                                             | Meaning                                                                                                                                                                                                                        |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `PUBLIC_ORIGIN`                                      | Origin used in links and `og:image`, e.g. `https://ntn.link`. Required in production; falls back to `https://$VERCEL_URL`, in development to `http://localhost:$PORT`.                                                         |
-| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Storage (Upstash Redis REST). `KV_REST_API_URL` / `KV_REST_API_TOKEN` are accepted too.                                                                                                                                        |
+| `DATABASE_URL`                                       | Storage: the **pooled** Neon Postgres connection string (the Vercel Neon integration injects it). Wins over the Redis variables below.                                                                                         |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Storage (Upstash Redis REST), used when `DATABASE_URL` is not set. `KV_REST_API_URL` / `KV_REST_API_TOKEN` are accepted too.                                                                                                   |
 | `ADMIN_TOKEN`                                        | Operator credential for `DELETE /api/links/<ws>/<slug>` via `X-Admin-Token`. Unset disables operator delete.                                                                                                                   |
 | `NTN_TRUST_PROXY`                                    | `1` makes rate limiting trust `X-Forwarded-For` (set it only behind a proxy that overwrites the header). Always trusted on Vercel. Otherwise all callers share one rate-limit bucket, because the header is client-controlled. |
 | `NTN_TEST_FETCHER`                                   | `1` enables the test fetcher, see below. Ignored with an error in production.                                                                                                                                                  |
 | `NTN_TEST_FETCHER_NO_IMAGE`                          | With the test fetcher: `1` drops the page's social image so the generated title card is served.                                                                                                                                |
 
-Without a store configuration the app uses an **in-memory store in development only** (data is lost
+Store precedence: `DATABASE_URL` (Postgres) before the Upstash/KV pair (Redis) before memory. Without
+any store configuration the app uses an **in-memory store in development only** (data is lost
 on restart and not shared between instances). In production a missing store or `PUBLIC_ORIGIN`
 makes every route answer `500 server_misconfigured` with a message naming the missing variable,
 and logs it; it never silently falls back to memory.
@@ -108,14 +113,22 @@ Environment variables (Production and Preview; see [Environment](#environment)):
 
 - `PUBLIC_ORIGIN`: the public origin, e.g. `https://ntn.link`.
 - `ADMIN_TOKEN`: optional, enables operator delete; mark it sensitive.
-- The store pair: `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`, or `KV_REST_API_URL` +
-  `KV_REST_API_TOKEN`. Each field is resolved on its own and the `UPSTASH_*` value wins, so a pair
-  from two different stores is possible; set one pair only. Without a store, production routes
-  answer `500 server_misconfigured`.
+- The store, one of (precedence in this order):
+  1. `DATABASE_URL`: the pooled Neon Postgres URL (Neon HTTP driver, one stateless HTTPS request
+     per storage call, nothing to pool or close in a serverless function). The tables `ntn_kv` and
+     `ntn_set_members` are created on first use (idempotent `CREATE ... IF NOT EXISTS`); the role
+     in the URL needs the right to create them once. Expiry uses the database clock.
+  2. `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`, or `KV_REST_API_URL` +
+     `KV_REST_API_TOKEN`. Each field is resolved on its own and the `UPSTASH_*` value wins, so a
+     pair from two different stores is possible; set one pair only.
 
-Create the store through the Upstash Redis integration of the Vercel Marketplace; the project owner
-has to accept Upstash's terms in that step, which an agent cannot do for them. Do not set
-`NTN_TEST_FETCHER` on Vercel (see the caveat above).
+  Without a store, production routes answer `500 server_misconfigured`. Set one backend only:
+  when `DATABASE_URL` is present the Redis variables are ignored.
+
+Create the Postgres store through the Neon integration of the Vercel Marketplace (or the Upstash
+Redis integration for the Redis option); the project owner has to accept the provider's terms in
+that step, which an agent cannot do for them. Do not set `NTN_TEST_FETCHER` on Vercel (see the
+caveat above).
 
 Ownership flow: `POST /api/challenge` returns a public `nonce` and a private `claimToken`; the owner
 puts the nonce into the title of a public page of the workspace, then `POST /api/verify` with the

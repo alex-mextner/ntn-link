@@ -16,6 +16,8 @@
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun test",
     "test:redis": "bun run packages/core/scripts/test-redis.ts",
+    "test:postgres": "bun run packages/core/scripts/test-postgres.ts",
+    "test:neon": "bun test packages/core/test/neon.integration.test.ts",
     "smoke:notion": "bun run packages/core/scripts/smoke-notion.ts"
   },
   "devDependencies": {

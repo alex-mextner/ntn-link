@@ -57,7 +57,7 @@ export class MemoryStore implements Store {
     const next = (entry ? Number(entry.value) : 0) + 1;
     this.#entries.set(key, {
       value: String(next),
-      expiresAt: entry ? entry.expiresAt : this.#now() + ttlSeconds * 1000,
+      expiresAt: entry?.expiresAt ?? this.#now() + ttlSeconds * 1000,
     });
     return next;
   }
