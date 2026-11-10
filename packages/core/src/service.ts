@@ -224,19 +224,22 @@ export function createService(deps: ServiceDeps): Service {
     now: () => now().getTime(),
   });
   /**
-   * What to store as `excerptDigest`: null for a page with its own cover (no text is drawn),
-   * the digest of the card's opening text otherwise. A page whose text was deleted digests the
-   * empty text, so the card gets a new image URL; a failed read looks the same (the image
-   * route draws the same text-less card then), which at worst costs one extra card version.
+   * What to store as `excerptDigest`: null for a page with its own cover (no text or icon is
+   * drawn), otherwise the digest of what the generated card shows of the page besides its
+   * title: the opening text and the icon. A page whose text was deleted digests the empty
+   * text, so the card gets a new image URL; a failed read looks the same (the image route
+   * draws the same bare card then), which at worst costs one extra card version.
    */
-  const cardTextDigest = async (
+  const cardPageDigest = async (
     workspace: string,
     pageId: string,
     imageUrl: string | null,
   ): Promise<string | null> => {
     if (imageUrl !== null && !isNotionPlaceholderImageUrl(imageUrl)) return null;
-    const lines = await loadExcerpt(workspace, pageId);
-    return (await sha256Hex(lines.join('\n'))).slice(0, 10);
+    const { excerpt, icon } = await loadPage(workspace, pageId);
+    const iconKey =
+      icon === null ? null : icon.kind === 'emoji' ? icon.emoji : await sha256Hex(icon.dataUri);
+    return (await sha256Hex(JSON.stringify([excerpt, iconKey]))).slice(0, 10);
   };
   const purge = async (workspace: string, slug: string): Promise<void> => {
     cardImages.delete(`${workspace}/${slug}`);
@@ -443,7 +446,7 @@ export function createService(deps: ServiceDeps): Service {
         );
       }
       const meta = page.metadata;
-      const excerptDigest = await cardTextDigest(page.workspace, page.pageId, meta.imageUrl);
+      const excerptDigest = await cardPageDigest(page.workspace, page.pageId, meta.imageUrl);
       const create = async (): Promise<CreateLinkOutcome> => {
         const overrides = request.overrides ?? {};
         const nowIso = now().toISOString();
@@ -567,7 +570,7 @@ export function createService(deps: ServiceDeps): Service {
       const nowIso = now().toISOString();
       const digest =
         result.kind === 'public' && result.workspace === record.workspace
-          ? await cardTextDigest(record.workspace, record.pageId, result.metadata.imageUrl)
+          ? await cardPageDigest(record.workspace, record.pageId, result.metadata.imageUrl)
           : null;
       const refreshed = await repo.updateLink(workspace, slug, (latest) =>
         // The slug may have been deleted and reused for another page while Notion answered.

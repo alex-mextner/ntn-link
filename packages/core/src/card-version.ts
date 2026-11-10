@@ -18,7 +18,8 @@ import type { LinkRecord } from './records';
  * drawn on it, or which images count as a usable cover. Bumping changes the image URL of
  * every link, so shared links pick up the new look the next time a crawler reads their page.
  */
-export const CARD_RENDER_VERSION = 1;
+export const CARD_RENDER_VERSION = 2;
+// 2: the generated card draws the page icon (and records now digest text and icon together).
 
 /** What the card is built from, as far as the stored record knows it. */
 function cardImageKey(imageUrl: string | null): string {
@@ -39,7 +40,7 @@ function cardImageKey(imageUrl: string | null): string {
 
 /**
  * Short, URL-safe digest of everything the stored record contributes to the card image:
- * the effective title and description, the cover (or its absence), the opening text drawn on a
+ * the effective title and description, the cover (or its absence), the opening text and icon drawn on a
  * coverless card, and the render version.
  */
 export async function cardImageVersion(record: LinkRecord): Promise<string> {

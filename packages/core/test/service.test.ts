@@ -480,6 +480,23 @@ describe('card image version in og:image', () => {
     expect(empty).not.toBe(before);
   });
 
+  test('a coverless card changes with the icon of the page', async () => {
+    h.notion.add(id(8), { workspace: 'thsm', title: 'Same', description: 'Pinned' });
+    await h.service.createLink({ url: pageUrl('thsm', 8), slug: 'icon' }, key);
+    const bare = await ogImageOf('icon');
+
+    h.icons.set(`thsm/${id(8)}`, { kind: 'emoji', emoji: '🤿' });
+    h.clock.advanceHours(25);
+    await h.service.refreshLink('thsm', 'icon');
+    const emoji = await ogImageOf('icon');
+    expect(emoji).not.toBe(bare);
+
+    h.icons.set(`thsm/${id(8)}`, { kind: 'image', dataUri: 'data:image/png;base64,AAAA' });
+    h.clock.advanceHours(25);
+    await h.service.refreshLink('thsm', 'icon');
+    expect(await ogImageOf('icon')).not.toBe(emoji);
+  });
+
   test('covers uploaded under the generated-card file name keep their own identity', async () => {
     h.notion.add(id(6), { workspace: 'thsm', title: 'Same', imageUrl: upload(1) });
     h.notion.add(id(7), { workspace: 'thsm', title: 'Same', imageUrl: upload(2) });

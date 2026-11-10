@@ -55,10 +55,10 @@ export const linkRecordSchema = z.object({
    */
   sweptVersion: z.string().nullable().optional(),
   /**
-   * Short digest of the page text drawn on the generated card (the card of a page without a
-   * cover), taken when the link was created or last refreshed; part of the card image version
-   * so an edit of the page's opening text gives the card a new image URL. Null for a page with
-   * a cover; absent on records written before this field existed.
+   * Short digest of the page text and icon drawn on the generated card (the card of a page
+   * without a cover), taken when the link was created or last refreshed; part of the card image
+   * version so an edit of the page's opening text or icon gives the card a new image URL. Null
+   * for a page with a cover; absent on records written before this field existed.
    */
   excerptDigest: z.string().nullable().optional(),
   /** Failed sweep fetches of this link for `version`; links with fewer failures are retried first. */

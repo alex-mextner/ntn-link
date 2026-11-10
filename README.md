@@ -91,7 +91,7 @@ The `og:image` of a link (and of its `/read` copy) is `/img/<ws>/<slug>?v=<versi
 is a short digest of the card render version (`CARD_RENDER_VERSION` in
 `packages/core/src/card-version.ts`, bumped whenever the look of the card changes), the effective
 title and description, the cover, and, for a page without a cover, a digest of the opening text
-drawn on its card (stored on create and on every refresh). A changed card therefore gets a new
+and the icon drawn on its card (stored on create and on every refresh). A changed card therefore gets a new
 image URL: crawlers that read the page again fetch the new image instead of reusing one cached
 under the old URL, and the CDN keeps one entry per version. `?v=` is ignored by the route itself.
 
