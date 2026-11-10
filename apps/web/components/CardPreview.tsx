@@ -1,9 +1,9 @@
 'use client';
 
 import { useId, useState } from 'react';
-import type { CardData } from '../../../packages/core/src/api-types';
+import type { CardData, CardIcon } from '../../../packages/core/src/api-types';
 import { planCardText } from '@/lib/card-layout';
-import { plainText, safeImageUrl } from '@/lib/client/text';
+import { plainText, safeIcon, safeImageUrl, type PreviewIcon } from '@/lib/client/text';
 import { en } from '@/lib/client/strings';
 
 type Platform = keyof typeof en.platforms;
@@ -19,6 +19,28 @@ const SAMPLE: CardData = {
   language: null,
 };
 
+/** The page icon in front of the host pill of the generated card: emoji as text, picture as image. */
+function PreviewIconMark({ icon }: { icon: PreviewIcon | null }) {
+  if (icon === null) return null;
+  if (icon.kind === 'emoji') {
+    return (
+      <span className="unfurl-fallback-icon" data-kind="emoji" aria-hidden="true">
+        {icon.text}
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      className="unfurl-fallback-icon"
+      data-kind="image"
+      src={icon.src}
+      alt=""
+      decoding="async"
+    />
+  );
+}
+
 /**
  * A live "unfurl": the card a messenger builds from the link, in the layout of Telegram, Slack
  * or X. All fields are Notion-controlled, so they are rendered as text nodes only.
@@ -26,6 +48,7 @@ const SAMPLE: CardData = {
 export function CardPreview({
   card,
   excerpt,
+  icon,
   host,
   sourceHost,
   mode,
@@ -33,6 +56,8 @@ export function CardPreview({
   card: CardData | null;
   /** Leading lines of the page's text, shown on the generated card of a cover-less page. */
   excerpt: readonly string[];
+  /** The page's icon, drawn above the title of the generated card. */
+  icon: CardIcon | null;
   host: string;
   /** The Notion domain the generated card names, `<workspace>.notion.site`. */
   sourceHost: string;
@@ -44,8 +69,9 @@ export function CardPreview({
   const image = mode === 'ready' ? safeImageUrl(shown.imageUrl) : null;
   const title = plainText(shown.title);
   const description = plainText(shown.description);
+  const shownIcon = safeIcon(icon);
   // The very text the generated /img card carries (same planner as the card renderer).
-  const cardText = planCardText(title, excerpt.map(plainText), description);
+  const cardText = planCardText(title, excerpt.map(plainText), description, icon !== null);
 
   return (
     <div className="unfurl-block">
@@ -81,7 +107,10 @@ export function CardPreview({
               <img src={image} alt="" referrerPolicy="no-referrer" decoding="async" />
             ) : mode === 'loading' ? null : (
               <span className="unfurl-fallback">
-                <span className="unfurl-fallback-host">{sourceHost}</span>
+                <span className="unfurl-fallback-top">
+                  <PreviewIconMark icon={shownIcon} />
+                  <span className="unfurl-fallback-host">{sourceHost}</span>
+                </span>
                 <span className="unfurl-fallback-copy">
                   <span className="unfurl-fallback-title">{cardText.title}</span>
                   {cardText.lines.map((line, index) => (

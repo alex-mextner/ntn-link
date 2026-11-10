@@ -117,6 +117,8 @@ export async function resolveFreshImage(args: {
   width: number;
   /** The client's `Accept`; Notion's image endpoint then answers WebP/AVIF where supported. */
   accept?: string;
+  /** Body cap; a larger image arrives truncated and is not served. Defaults to `IMAGE_LIMITS.maxBytes`. */
+  maxBytes?: number;
   fetchImpl?: typeof fetch;
 }): Promise<ResolvedImage | null> {
   const source = args.source === undefined ? imageSourceOf(args.block) : args.source;
@@ -124,7 +126,7 @@ export async function resolveFreshImage(args: {
   const result = await safeFetch(imageRequestUrl(args.workspace, args.block, source, args.width), {
     allow: allowNotionImageUrl,
     headers: new Headers({ accept: preferredAccept(args.accept) }),
-    maxBytes: IMAGE_LIMITS.maxBytes,
+    maxBytes: args.maxBytes ?? IMAGE_LIMITS.maxBytes,
     timeoutMs: IMAGE_LIMITS.timeoutMs,
     fetchImpl: args.fetchImpl,
   }).catch((cause: unknown) => {

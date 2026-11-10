@@ -43,3 +43,4 @@ export type {
 export { Repository } from './records';
 export type { LinkRecord, NamespaceRecord, ChallengeRecord } from './records';
 export type { SweepResult, SweepBudget } from './ownership';
+export type { CardPage } from './render/card-page';

@@ -41,6 +41,7 @@ const STUB_CSS = [
   'body{margin:0;min-height:100vh;display:grid;place-items:center;padding:1.5rem;background:radial-gradient(40rem 26rem at 10% -10%,rgba(124,92,255,.28),transparent 62%),radial-gradient(34rem 24rem at 100% 0,rgba(56,189,248,.16),transparent 58%),var(--bg);color:var(--fg);font:1rem/1.55 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;text-align:center}',
   'main{max-width:28rem}',
   '.m{display:grid;place-items:center;width:3rem;height:3rem;margin:0 auto 1.25rem;border-radius:.9rem;background:var(--g);color:var(--ink)}',
+  '.m.e{width:auto;height:auto;border-radius:0;background:none;font-size:3.5rem;line-height:1;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}',
   'h1{margin:0 0 .5rem;font-size:1.625rem;line-height:1.2;letter-spacing:-.025em}',
   'p{margin:.5rem 0;color:var(--mut)}',
   'a{color:var(--ac);font-weight:600;text-underline-offset:.2em}',
@@ -59,6 +60,16 @@ const FAVICON_SVG =
  */
 export const FAVICON_LINK = `<link rel="icon" href="data:image/svg+xml;base64,${Buffer.from(FAVICON_SVG).toString('base64')}">`;
 
+/**
+ * The page's own emoji as the tab icon (Notion's public pages do the same): an SVG data URI
+ * holding the emoji as text, drawn by the visitor's emoji font, Apple Color Emoji first, so it
+ * costs no request. `emoji` is escaped for XML.
+ */
+export function emojiFaviconLink(emoji: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90" font-family="Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji,sans-serif">${escapeHtml(emoji)}</text></svg>`;
+  return `<link rel="icon" href="data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}">`;
+}
+
 export interface RedirectPageInput {
   title: string;
   description: string;
@@ -69,6 +80,8 @@ export interface RedirectPageInput {
   /** Canonical Notion URL humans are sent to. */
   targetUrl: string;
   language: string | null;
+  /** The page's emoji icon, shown in place of the ntn.link mark and as the tab icon; null when it has none. */
+  emoji: string | null;
 }
 
 export function renderRedirectHtml(input: RedirectPageInput): string {
@@ -95,14 +108,14 @@ export function renderRedirectHtml(input: RedirectPageInput): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
-${tags.join('\n')}
+${input.emoji === null ? '' : `${emojiFaviconLink(input.emoji)}\n`}${tags.join('\n')}
 <meta http-equiv="refresh" content="0;url=${target}">
 <style>${STUB_CSS}</style>
 <script>location.replace(${scriptString(input.targetUrl)})</script>
 </head>
 <body>
 <main>
-${MARK}
+${input.emoji === null ? MARK : `<span class="m e" aria-hidden="true">${escapeHtml(input.emoji)}</span>`}
 <p lang="en">Opening the Notion page…</p>
 <noscript><p><a href="${target}">${title}</a></p></noscript>
 </main>
