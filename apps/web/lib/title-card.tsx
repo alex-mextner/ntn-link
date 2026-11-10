@@ -1,5 +1,6 @@
 /**
- * Generated 1200x630 card for links whose page has no social image. Fonts are bundled
+ * Generated 1200x630 card for links whose page has no social image: the ntn.link identity
+ * (ink background, violet and sky glow, link glyph) around the page title. Fonts are bundled
  * (latin + cyrillic subsets of Noto Sans Bold) so rendering needs no network and Cyrillic
  * titles never fall back to tofu boxes.
  */
@@ -37,6 +38,25 @@ function clip(text: string, max: number): string {
   return chars.length <= max ? chars.join('') : `${chars.slice(0, max - 1).join('')}…`;
 }
 
+/** The ntn.link glyph (two interlocked chain links), the same path as app/icon.svg. */
+function Glyph({ size }: { size: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#0b0b14"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
+      <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+    </svg>
+  );
+}
+
 export async function renderTitleCard(
   title: string,
   description: string,
@@ -51,13 +71,29 @@ export async function renderTitleCard(
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
-        padding: 72,
-        background: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
-        color: '#f9fafb',
+        padding: 64,
+        // Violet glow top right, sky glow bottom left, over near-black ink.
+        backgroundColor: '#0a0a12',
+        backgroundImage:
+          'radial-gradient(circle at 92% 0%, rgba(124,92,255,0.55) 0%, rgba(124,92,255,0) 52%), radial-gradient(circle at 0% 100%, rgba(56,189,248,0.30) 0%, rgba(56,189,248,0) 50%)',
+        color: '#f3f3f8',
         fontFamily: FONT_STACK,
       }}
     >
-      <div style={{ display: 'flex', height: 40, fontSize: 30, color: '#9ca3af' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          alignSelf: 'flex-start',
+          height: 44,
+          padding: '0 20px',
+          fontSize: 26,
+          color: '#c9c9de',
+          background: 'rgba(255,255,255,0.08)',
+          border: '1px solid rgba(255,255,255,0.16)',
+          borderRadius: 22,
+        }}
+      >
         {workspace}.notion.site
       </div>
       {/* Fixed-height regions with clipping: a long or unbroken title can never push past the
@@ -71,6 +107,7 @@ export async function renderTitleCard(
             overflow: 'hidden',
             fontSize: 64,
             lineHeight: 1.15,
+            letterSpacing: -1.5,
             wordBreak: 'break-word',
           }}
         >
@@ -85,7 +122,7 @@ export async function renderTitleCard(
               overflow: 'hidden',
               fontSize: 30,
               lineHeight: 1.25,
-              color: '#d1d5db',
+              color: '#b4b4cc',
               marginTop: 24,
               wordBreak: 'break-word',
             }}
@@ -93,6 +130,25 @@ export async function renderTitleCard(
             {clip(description, DESCRIPTION_MAX)}
           </div>
         )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', height: 44 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 44,
+            height: 44,
+            borderRadius: 13,
+            backgroundImage: 'linear-gradient(135deg, #a99bff 0%, #5fc8f8 100%)',
+          }}
+        >
+          <Glyph size={26} />
+        </div>
+        <div style={{ display: 'flex', marginLeft: 14, fontSize: 30, color: '#f3f3f8' }}>
+          ntn
+          <span style={{ color: '#8fc0ff' }}>.link</span>
+        </div>
       </div>
     </div>,
     { width: 1200, height: 630, fonts: await loadFonts(), headers },

@@ -312,3 +312,44 @@ export function createStore<S, A>(reduce: (state: S, action: A) => S, initial: S
     },
   };
 }
+
+export type StepId = 'preview' | 'verify' | 'create' | 'share';
+export type StepStatus = 'done' | 'current' | 'busy' | 'upcoming';
+
+export interface Step {
+  id: StepId;
+  status: StepStatus;
+}
+
+/**
+ * Where the person is on the way from a Notion URL to a shared link, for the step indicator.
+ * `busy` marks the step whose request is in flight. Verification counts as done as soon as the
+ * workspace needs no proof (already owned, or just verified).
+ */
+export function flowSteps(state: FlowState): Step[] {
+  const { phase, preview } = state;
+  const verified = preview !== null && !preview.needsVerification;
+  const current: StepId =
+    phase === 'idle' || phase === 'previewing'
+      ? 'preview'
+      : isVerificationPhase(phase)
+        ? 'verify'
+        : phase === 'created'
+          ? 'share'
+          : 'create';
+  const busy =
+    phase === 'previewing' ||
+    phase === 'requesting_challenge' ||
+    phase === 'verifying' ||
+    phase === 'creating';
+  const order: StepId[] = ['preview', 'verify', 'create', 'share'];
+  const at = order.indexOf(current);
+  return order.map((id, index): Step => {
+    if (id === current)
+      return { id, status: phase === 'created' ? 'done' : busy ? 'busy' : 'current' };
+    if (id === 'verify' && current !== 'verify') {
+      return { id, status: verified || phase === 'created' ? 'done' : 'upcoming' };
+    }
+    return { id, status: index < at ? 'done' : 'upcoming' };
+  });
+}

@@ -5,14 +5,14 @@ import { ERROR_CODES } from '../../../../packages/core/src/api-types';
 import { ApiCallError, describeError, errorFromBody } from '../../lib/client/errors';
 
 describe('error mapping', () => {
-  test('every typed code of the contract has a Russian message', () => {
+  test('every typed code of the contract has an English message', () => {
     for (const code of ERROR_CODES) {
       const message = describeError(new ApiCallError(code, 400));
-      expect(message).toMatch(/[А-Яа-яЁё]/);
+      expect(message).toMatch(/^[A-Z][a-z]/);
     }
   });
 
-  test('uses our message, never the server English text', () => {
+  test('uses our message, never the server text', () => {
     const error = errorFromBody(422, {
       error: { code: 'not_public', message: 'Page is not public <script>' },
     });
@@ -48,11 +48,11 @@ describe('error mapping', () => {
   ])('unknown body %p becomes a generic error', (body) => {
     const error = errorFromBody(500, body);
     expect(error.code).toBe('unexpected');
-    expect(describeError(error)).toMatch(/[А-Яа-я]/);
+    expect(describeError(error)).toMatch(/^[A-Z][a-z]/);
   });
 
   test('network failures and foreign exceptions are human too', () => {
-    expect(describeError(new ApiCallError('network', 0))).toContain('связи');
-    expect(describeError(new TypeError('boom'))).toMatch(/[А-Яа-я]/);
+    expect(describeError(new ApiCallError('network', 0))).toContain('connection');
+    expect(describeError(new TypeError('boom'))).toMatch(/^[A-Z][a-z]/);
   });
 });

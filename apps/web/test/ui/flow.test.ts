@@ -186,13 +186,13 @@ describe('create flow', () => {
     expect(state.preview?.needsVerification).toBe(true);
   });
 
-  test('preview failure surfaces a Russian message on the URL field', async () => {
+  test('preview failure surfaces an English message on the URL field', async () => {
     const { store, controller, type } = setup({ preview: [apiError('not_public', 422)] });
     type();
     await controller.loadPreview();
     expect(store.getState().phase).toBe('idle');
     expect(store.getState().error).toMatchObject({ code: 'not_public', scope: 'url' });
-    expect(store.getState().error?.message).toMatch(/публичн/);
+    expect(store.getState().error?.message).toMatch(/not public/);
   });
 
   test('a stored key is sent with the preview of its own workspace only', async () => {
@@ -594,7 +594,7 @@ describe('result panel actions', () => {
     await toCreated(ctx);
     await ctx.controller.setFast(false);
     expect(ctx.store.getState().phase).toBe('created');
-    expect(ctx.store.getState().error?.message).toMatch(/быстр/i);
+    expect(ctx.store.getState().error?.message).toMatch(/fast mode/i);
   });
 });
 
@@ -687,7 +687,7 @@ describe('cleanup after rotation', () => {
     const ctx = await rotated({ sweep: [apiError('not_implemented', 404)] });
     await ctx.controller.runCleanup('thsm');
     expect(ctx.store.getState().cleanups[0]?.status).toBe('unsupported');
-    expect(ctx.store.getState().cleanups[0]?.message).toMatch(/не поддерживает/);
+    expect(ctx.store.getState().cleanups[0]?.message).toMatch(/does not support/);
   });
 });
 
@@ -724,12 +724,12 @@ describe('my links', () => {
     expect(loadKey(storage, ORIGIN, 'thsm')).toBe('NEW');
   });
 
-  test('delete returns null on success and a Russian message on failure', async () => {
+  test('delete returns null on success and an English message on failure', async () => {
     const storage = new MemoryStorage();
     storage.setItem(KEY_NAME, 'K');
     const ctx = setup({ deleteLink: [{ deleted: true }, apiError('not_found', 404)] }, storage);
     expect(await ctx.controller.deleteLink('thsm', 'a')).toBeNull();
-    expect(await ctx.controller.deleteLink('thsm', 'a')).toMatch(/[А-Яа-я]/);
+    expect(await ctx.controller.deleteLink('thsm', 'a')).toMatch(/^[A-Z]/);
     expect(ctx.calls[0]).toMatchObject({ name: 'deleteLink', args: ['thsm', 'a', 'K'] });
   });
 });
