@@ -5,6 +5,7 @@ import type { LinkView } from '../../../../packages/core/src/api-types';
 import { createController, type Controller } from '../../lib/client/controller';
 import {
   createStore,
+  flowSteps,
   initialState,
   reducer,
   previewCard,
@@ -72,7 +73,11 @@ describe('reducer', () => {
   test('changing the URL discards preview, verification and result', () => {
     let state = reducer(initialState, { type: 'url_changed', url: 'a' });
     state = reducer(state, { type: 'preview_started' });
-    state = reducer(state, { type: 'preview_loaded', preview: previewFixture() });
+    state = reducer(state, {
+      type: 'preview_loaded',
+      preview: previewFixture(),
+      keyUntested: false,
+    });
     expect(state.phase).toBe('ready');
     state = reducer(state, { type: 'url_changed', url: 'b' });
     expect(state).toEqual({ ...initialState, url: 'b' });
@@ -82,7 +87,11 @@ describe('reducer', () => {
     let state = reducer(initialState, { type: 'url_changed', url: 'a' });
     state = reducer(state, { type: 'preview_started' });
     state = reducer(state, { type: 'url_changed', url: 'b' });
-    const after = reducer(state, { type: 'preview_loaded', preview: previewFixture() });
+    const after = reducer(state, {
+      type: 'preview_loaded',
+      preview: previewFixture(),
+      keyUntested: false,
+    });
     expect(after.phase).toBe('idle');
     expect(after.preview).toBeNull();
   });
@@ -90,7 +99,11 @@ describe('reducer', () => {
   test('a user-edited slug survives a later preview', () => {
     let state = reducer(initialState, { type: 'preview_started' });
     state = { ...state, slugTouched: true, slug: 'mine' };
-    state = reducer(state, { type: 'preview_loaded', preview: previewFixture() });
+    state = reducer(state, {
+      type: 'preview_loaded',
+      preview: previewFixture(),
+      keyUntested: false,
+    });
     expect(state.slug).toBe('mine');
   });
 
@@ -371,6 +384,62 @@ describe('create flow', () => {
     await controller.create();
     expect(calls.find((c) => c.name === 'createLink')!.args[1]).toBe('MAYBE-GOOD');
     expect(store.getState().phase).toBe('created');
+  });
+
+  test('a stored key the preview request did not carry keeps the create step current, even after slug_taken', async () => {
+    const storage = new MemoryStorage();
+    storage.setItem(KEY_NAME, 'MAYBE-GOOD');
+    const { store, controller, type } = setup(
+      {
+        preview: [previewFixture({ namespaceClaimed: true, suggestedAction: 'rotate' })],
+        createLink: [apiError('slug_taken', 409)],
+      },
+      storage,
+    );
+    const highlighted = () =>
+      flowSteps(store.getState())
+        .filter((step) => step.status === 'current' || step.status === 'busy')
+        .map((step) => step.id);
+    type('https://www.notion.so/thsm/Page-413d447ac4b180169985c93eea7f02f9');
+    await controller.loadPreview();
+    expect(highlighted()).toEqual(['create']);
+    await controller.create();
+    expect(store.getState().error).toMatchObject({ code: 'slug_taken' });
+    expect(highlighted()).toEqual(['create']);
+  });
+
+  test('a key stored for another workspace than the one hinted by the URL is still untested', async () => {
+    const storage = new MemoryStorage();
+    storage.setItem(`ntn-link:owner-key:${ORIGIN}:other`, 'FOR-OTHER');
+    storage.setItem(KEY_NAME, 'FOR-THSM');
+    const { store, controller, type } = setup({ preview: [previewFixture()] }, storage);
+    type('https://other.notion.site/Page-413d447ac4b180169985c93eea7f02f9');
+    await controller.loadPreview();
+    expect(store.getState().keyUntested).toBe(true);
+    expect(flowSteps(store.getState()).find((s) => s.status === 'current')?.id).toBe('create');
+  });
+
+  test('a key replaced while the preview was in flight is still untested', async () => {
+    const storage = new MemoryStorage();
+    storage.setItem(KEY_NAME, 'OLD');
+    const gate = deferred<ReturnType<typeof previewFixture>>();
+    const { store, controller, type } = setup({ preview: [gate.promise] }, storage);
+    type();
+    const pending = controller.loadPreview();
+    storage.setItem(KEY_NAME, 'NEW');
+    gate.resolve(previewFixture());
+    await pending;
+    expect(store.getState().keyUntested).toBe(true);
+  });
+
+  test('the key the preview carried is judged by the server, not untested', async () => {
+    const storage = new MemoryStorage();
+    storage.setItem(KEY_NAME, 'K');
+    const { store, controller, type } = setup({ preview: [previewFixture()] }, storage);
+    type();
+    await controller.loadPreview();
+    expect(store.getState().keyUntested).toBe(false);
+    expect(flowSteps(store.getState()).find((s) => s.status === 'current')?.id).toBe('verify');
   });
 
   test('slug_taken after a fresh verification keeps the new key for the retry', async () => {
