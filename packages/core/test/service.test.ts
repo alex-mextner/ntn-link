@@ -375,6 +375,18 @@ describe('card source', () => {
     expect(await h.service.cardSource('thsm', 'banner')).toMatchObject({ kind: 'generated' });
   });
 
+  test('a stored generated "Made with Notion" card is not served when Notion cannot be reached', async () => {
+    h.notion.add(id(6), {
+      workspace: 'thsm',
+      title: 'Legacy',
+      imageUrl:
+        'https://thsm.notion.site/image/attachment%3Aabc%3ASocialMediaPreviewImage.png?table=block&width=2000',
+    });
+    await h.service.createLink({ url: pageUrl('thsm', 6), slug: 'legacy' }, key);
+    h.notion.failing.add(id(6));
+    expect(await h.service.cardSource('thsm', 'legacy')).toMatchObject({ kind: 'generated' });
+  });
+
   test('the excerpt is read for the page id of the card source, never for whatever the slug is now', async () => {
     await h.service.createLink({ url: pageUrl('thsm', 2), slug: 'noimg' }, key);
     h.excerpts.set(`thsm/${id(2)}`, ['Text of page A']);

@@ -8,7 +8,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ImageResponse } from 'next/og';
-import { clip, planExcerpt, rowsNeeded } from './card-layout';
+import { CARD_TEXT_SIZE, CARD_TITLE_SIZE, planCardText } from './card-layout';
 
 // Distinct family names, chained in `fontFamily`: satori only falls back between families,
 // two subsets registered under one name leave the second one unused.
@@ -17,17 +17,12 @@ const FONT_FILES = [
   { family: 'Noto Sans Cyrillic', file: 'noto-sans-cyrillic-700-normal.woff' },
 ] as const;
 const FONT_STACK = FONT_FILES.map(({ family }) => family).join(', ');
-const TITLE_MAX = 90;
-
-const TITLE_SIZE = 66;
+const TITLE_SIZE = CARD_TITLE_SIZE;
 const TITLE_LINE_HEIGHT = 1.12;
 const TITLE_ROWS = 2;
-const TEXT_SIZE = 34;
+const TEXT_SIZE = CARD_TEXT_SIZE;
 const TEXT_LINE_HEIGHT = 1.32;
-const TEXT_ROW_EM = (1200 - 2 * 56) / TEXT_SIZE;
-const TITLE_ROW_EM = (1200 - 2 * 56) / TITLE_SIZE;
 const TEXT_ROWS = 5;
-const TEXT_ROWS_PER_LINE = 2;
 const TEXT_LINE_GAP = 12;
 
 type Font = { name: string; data: Buffer; weight: 700; style: 'normal' };
@@ -76,15 +71,7 @@ export async function renderTitleCard(
   workspace: string,
   headers: Record<string, string>,
 ): Promise<ImageResponse> {
-  const title = clip(content.title, TITLE_MAX);
-  const source = content.excerpt.length > 0 ? content.excerpt : [content.description];
-  // A title on two rows takes a text row's height from the excerpt so the frame never overflows.
-  const titleRows = rowsNeeded(title, TITLE_ROW_EM, TITLE_ROWS);
-  const lines = planExcerpt(source, {
-    rows: TEXT_ROWS - (titleRows - 1),
-    rowEm: TEXT_ROW_EM,
-    rowsPerLine: TEXT_ROWS_PER_LINE,
-  });
+  const { title, lines } = planCardText(content.title, content.excerpt, content.description);
   return new ImageResponse(
     <div
       style={{

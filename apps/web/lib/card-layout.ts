@@ -80,3 +80,38 @@ export function planExcerpt(lines: readonly string[], budget: ExcerptBudget): Pl
   }
   return chosen;
 }
+
+/** Sizes of the generated 1200x630 card, in px; the card and its preview plan text with the same ones. */
+export const CARD_TITLE_SIZE = 66;
+export const CARD_TEXT_SIZE = 34;
+export const CARD_TITLE_MAX = 90;
+const CARD_PAD = 56;
+const TITLE_ROWS = 2;
+const TEXT_ROWS = 5;
+const TEXT_ROWS_PER_LINE = 2;
+
+export interface CardText {
+  title: string;
+  lines: PlannedLine[];
+}
+
+/**
+ * What the generated card shows: the clipped title and the leading lines of the page (the
+ * description when the page has no text). The image route and the web preview both call this,
+ * so the preview can never promise different text than the card carries.
+ */
+export function planCardText(
+  title: string,
+  excerpt: readonly string[],
+  description: string,
+): CardText {
+  const clipped = clip(title, CARD_TITLE_MAX);
+  const titleRows = rowsNeeded(clipped, (1200 - 2 * CARD_PAD) / CARD_TITLE_SIZE, TITLE_ROWS);
+  // A title on two rows takes a text row's height from the excerpt so the frame never overflows.
+  const lines = planExcerpt(excerpt.length > 0 ? excerpt : [description], {
+    rows: TEXT_ROWS - (titleRows - 1),
+    rowEm: (1200 - 2 * CARD_PAD) / CARD_TEXT_SIZE,
+    rowsPerLine: TEXT_ROWS_PER_LINE,
+  });
+  return { title: clipped, lines };
+}

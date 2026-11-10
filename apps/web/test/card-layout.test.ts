@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { clip, planExcerpt, rowsNeeded } from '../lib/card-layout';
+import { clip, planCardText, planExcerpt, rowsNeeded } from '../lib/card-layout';
 
 // The text row of the generated card: (1200 - 2 * 56) px at 34 px.
 const ROW_EM = (1200 - 2 * 56) / 34;
@@ -56,5 +56,20 @@ describe('planExcerpt', () => {
       'text',
     ]);
     expect(planExcerpt([], budget)).toEqual([]);
+  });
+});
+
+describe('planCardText', () => {
+  test('is what both the card and its preview show: clipped title, planned lines, description fallback', () => {
+    const plan = planCardText('Title', ['one', 'two', 'three', 'four', 'five', 'six'], 'desc');
+    expect(plan.title).toBe('Title');
+    expect(plan.lines.map((line) => line.text)).toEqual(['one', 'two', 'three', 'four', 'five']);
+    expect(planCardText('Title', [], 'desc').lines.map((line) => line.text)).toEqual(['desc']);
+  });
+
+  test('a title on two rows leaves one text row less', () => {
+    const long = 'Wide title '.repeat(8);
+    const plan = planCardText(long, ['a', 'b', 'c', 'd', 'e'], '');
+    expect(plan.lines).toHaveLength(4);
   });
 });

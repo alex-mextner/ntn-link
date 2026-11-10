@@ -24,7 +24,7 @@ import { TtlCache } from './card-cache';
 import { ApiError } from './errors';
 import { withImageWidth } from './metadata';
 import type { PageFetcher, PageFetchResult } from './notion-fetcher';
-import { isNotionPlaceholderImageUrl } from './notion-placeholder';
+import { isNotionGeneratedCardUrl, isNotionPlaceholderImageUrl } from './notion-placeholder';
 import { parseNotionUrl, canonicalNotionUrl, isUsableWorkspace } from './notion-url';
 import { renderGoneHtml, renderRedirectHtml } from './og-html';
 import { loadCardExcerpt } from './render/excerpt';
@@ -524,7 +524,13 @@ export function createService(deps: ServiceDeps): Service {
         // The stored URL is only a fallback for transient fetch failures: a page that is no
         // longer public, or moved to another workspace, must not keep serving its image.
         const fresh = await fetchFresh(record);
-        if (fresh === null) return { value: record.imageUrl, cacheable: false };
+        if (fresh === null) {
+          // A stored "Made with Notion" card cannot be told from an upload without the page
+          // data, which is exactly what is unavailable here: do not serve it.
+          const stored = record.imageUrl;
+          const generated = stored !== null && isNotionGeneratedCardUrl(stored);
+          return { value: generated ? null : stored, cacheable: false };
+        }
         const stillHere = fresh.kind === 'public' && fresh.workspace === record.workspace;
         return { value: stillHere ? fresh.metadata.imageUrl : null, cacheable: true };
       });

@@ -2,6 +2,7 @@
 
 import { useId, useState } from 'react';
 import type { CardData } from '../../../packages/core/src/api-types';
+import { planCardText } from '@/lib/card-layout';
 import { plainText, safeImageUrl } from '@/lib/client/text';
 import { en } from '@/lib/client/strings';
 
@@ -43,11 +44,8 @@ export function CardPreview({
   const image = mode === 'ready' ? safeImageUrl(shown.imageUrl) : null;
   const title = plainText(shown.title);
   const description = plainText(shown.description);
-  // The same choice the generated /img card makes: the page text, the description when empty.
-  const bodyLines = (excerpt.length > 0 ? excerpt : [description])
-    .map(plainText)
-    .filter((line) => line !== '')
-    .slice(0, 6);
+  // The very text the generated /img card carries (same planner as the card renderer).
+  const cardText = planCardText(title, excerpt.map(plainText), description);
 
   return (
     <div className="unfurl-block">
@@ -85,10 +83,10 @@ export function CardPreview({
               <span className="unfurl-fallback">
                 <span className="unfurl-fallback-host">{sourceHost}</span>
                 <span className="unfurl-fallback-copy">
-                  <span className="unfurl-fallback-title">{title}</span>
-                  {bodyLines.map((line, index) => (
+                  <span className="unfurl-fallback-title">{cardText.title}</span>
+                  {cardText.lines.map((line, index) => (
                     <span key={index} className="unfurl-fallback-line">
-                      {line}
+                      {line.text}
                     </span>
                   ))}
                 </span>
