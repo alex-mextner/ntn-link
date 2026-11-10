@@ -20,8 +20,11 @@ export const INTERCEPT_TIMEOUT_MS = 3000;
 /** The service worker stops this much before the page-side wait so the page never gives up first. */
 export const RELAY_MARGIN_MS = 300;
 
-/** Explicit actions (toolbar, shortcut) may be slower: nothing is racing a user gesture. */
-export const EXPLICIT_TIMEOUT_MS = 8000;
+/**
+ * Explicit actions (toolbar, shortcut) may be slower: nothing is racing a user gesture. Must
+ * cover the service's 10 s database warm-up after idle (Neon scale-to-zero) plus the request.
+ */
+export const EXPLICIT_TIMEOUT_MS = 20_000;
 
 /**
  * How long a "this page is public" (or "is not") answer is trusted. Short on the negative

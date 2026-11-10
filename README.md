@@ -118,6 +118,13 @@ Environment variables (Production and Preview; see [Environment](#environment)):
      per storage call, nothing to pool or close in a serverless function). The tables `ntn_kv` and
      `ntn_set_members` are created on first use (idempotent `CREATE ... IF NOT EXISTS`); the role
      in the URL needs the right to create them once. Expiry uses the database clock.
+     Neon's free plan scales the database to zero after about 5 minutes idle, and the first query
+     then takes several seconds. Before an instance's first statement, and again after 4 minutes
+     without an answer, the store sends an idempotent `SELECT 1` with a 10 s deadline (shared by
+     concurrent callers, a failure is `502 upstream_error`, logged as `WARMUP`/`warmup-timeout`);
+     real statements keep their 3 s deadline and are never retried. Routes that touch storage set
+     `maxDuration = 60` (the 10 s warm-up plus the request's own Notion calls) to leave room for it; the
+     extension's explicit actions wait up to 20 s for the same reason.
   2. `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`, or `KV_REST_API_URL` +
      `KV_REST_API_TOKEN`. Each field is resolved on its own and the `UPSTASH_*` value wins, so a
      pair from two different stores is possible; set one pair only.

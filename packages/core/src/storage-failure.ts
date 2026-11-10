@@ -11,6 +11,7 @@ export const FAILURE_MESSAGES = {
   'backend-error': 'The backend rejected the command.',
   'bad-reply': 'The backend sent a reply that could not be parsed.',
   network: 'The request failed in transport.',
+  'warmup-timeout': 'The database did not wake up within the warm-up deadline.',
 } as const;
 export type FailureKind = keyof typeof FAILURE_MESSAGES;
 
