@@ -38,8 +38,8 @@ const SERVABLE_TYPES: ReadonlySet<string> = new Set([
   'image/avif',
 ]);
 
-export function imageSourceOf(block: NotionBlock): ImageSource | null {
-  const raw = plainTextOf(block, 'source') || block.format.display_source || '';
+/** The source behind a raw Notion image reference; null when it may not be proxied. */
+export function imageSourceFromRaw(raw: string): ImageSource | null {
   if (raw.startsWith('attachment:')) return { kind: 'attachment', value: raw };
   let url: URL;
   try {
@@ -51,6 +51,30 @@ export function imageSourceOf(block: NotionBlock): ImageSource | null {
     return { kind: 'notion-file', value: url.href };
   }
   return allowNotionImageUrl(url) ? { kind: 'external', value: url.href } : null;
+}
+
+export function imageSourceOf(block: NotionBlock): ImageSource | null {
+  return imageSourceFromRaw(plainTextOf(block, 'source') || block.format.display_source || '');
+}
+
+/** The two decorations of a page that are pictures: the cover and an uploaded or linked icon. */
+export type PageImageSlot = 'cover' | 'icon';
+
+/**
+ * Cover or icon picture of a page block. Notion's gallery covers are relative paths
+ * (`/images/page-cover/x.jpg`); like uploads they are resized by the workspace `/image/`
+ * endpoint. Emoji icons are not pictures and give null.
+ */
+export function pageImageSourceOf(
+  page: NotionBlock,
+  slot: PageImageSlot,
+  workspace: string,
+): ImageSource | null {
+  const raw = (slot === 'cover' ? page.format.page_cover : page.format.page_icon) ?? '';
+  if (raw.startsWith('/images/')) {
+    return { kind: 'notion-file', value: `https://${workspace}.notion.site${raw}` };
+  }
+  return imageSourceFromRaw(raw);
 }
 
 export function imageRequestUrl(
@@ -88,12 +112,14 @@ export function preferredAccept(clientAccept: string | undefined): string {
 export async function resolveFreshImage(args: {
   workspace: string;
   block: NotionBlock;
+  /** What to fetch; defaults to the image block's own source. */
+  source?: ImageSource | null;
   width: number;
   /** The client's `Accept`; Notion's image endpoint then answers WebP/AVIF where supported. */
   accept?: string;
   fetchImpl?: typeof fetch;
 }): Promise<ResolvedImage | null> {
-  const source = imageSourceOf(args.block);
+  const source = args.source === undefined ? imageSourceOf(args.block) : args.source;
   if (source === null) return null;
   const result = await safeFetch(imageRequestUrl(args.workspace, args.block, source, args.width), {
     allow: allowNotionImageUrl,

@@ -47,8 +47,11 @@ describe('renderRichText', () => {
   test('equations, dates and background highlights', () => {
     expect(render([['⁍', [['e', 'x^2 < y']]]])).toBe('<span class="eq">x^2 &lt; y</span>');
     expect(render([['‣', [['d', { start_date: '2027-01-18' }]]]])).toBe('2027-01-18');
-    expect(render([['hot', [['h', 'yellow_background']]]])).toBe('<mark>hot</mark>');
-    expect(render([['red', [['h', 'red']]]])).toBe('red');
+    expect(render([['hot', [['h', 'yellow_background']]]])).toBe('<mark class="yellow">hot</mark>');
+    expect(render([['red', [['h', 'red']]]])).toBe('<span class="red tx">red</span>');
+    // Colours are a fixed set of class names: nothing from Notion's text reaches the attribute.
+    expect(render([['x', [['h', 'red" onclick="1_background']]]])).toBe('x');
+    expect(render([['x', [['h', 'magenta']]]])).toBe('x');
   });
 
   test('soft line breaks survive, escaped, also inside formatted text', () => {

@@ -100,13 +100,36 @@ const WRAPPERS: ReadonlyArray<readonly [kind: string, tag: string]> = [
   ['c', 'code'],
 ];
 
+const COLOURS: ReadonlySet<string> = new Set([
+  'gray',
+  'brown',
+  'orange',
+  'yellow',
+  'teal',
+  'blue',
+  'purple',
+  'pink',
+  'red',
+]);
+
+/** A Notion colour value (`red`, `red_background`) as its name and whether it fills the background. */
+export function parseColour(value: unknown): { name: string; background: boolean } | null {
+  if (typeof value !== 'string') return null;
+  const background = value.endsWith('_background');
+  const name = background ? value.slice(0, -'_background'.length) : value;
+  return COLOURS.has(name) ? { name, background } : null;
+}
+
 function renderSegment(segment: RichTextSegment, ctx: RichTextContext): string {
   const [text, decorations = []] = segment;
   let html = segmentInner(text, decorations, ctx);
   // Fixed nesting order (outermost last) so equal formatting gives equal markup.
-  // Only background highlights become <mark>; text colours are not carried over.
-  if (decorations.some((d) => d[0] === 'h' && String(d[1]).endsWith('_background'))) {
-    html = `<mark>${html}</mark>`;
+  // Colours are a fixed set of class names (never Notion's text), styled in css.ts.
+  const colour = parseColour(decorations.find((d) => d[0] === 'h')?.[1]);
+  if (colour !== null) {
+    html = colour.background
+      ? `<mark class="${colour.name}">${html}</mark>`
+      : `<span class="${colour.name} tx">${html}</span>`;
   }
   for (const [kind, tag] of WRAPPERS.toReversed()) {
     if (decorations.some((d) => d[0] === kind)) html = `<${tag}>${html}</${tag}>`;

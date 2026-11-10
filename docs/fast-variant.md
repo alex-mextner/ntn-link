@@ -76,6 +76,25 @@ Open the original in Notion</a></footer></article>`, plus canonical (self by def
 Open Graph and Twitter tags identical in kind to the redirect card, `article:modified_time`, and a
 schema.org `Article` JSON-LD block (`<`, `>`, `&`, U+2028/9 escaped).
 
+## Notion look
+
+The page is styled to match Notion's own public page, measured from rendered pages: the 720 px
+column (704 px of text), 40 px title with the page icon (78 px emoji, 124 px picture) over an
+optional 200 px cover, 30/24/20 px headings, 24 px lines, Notion's block spacing, callouts
+(10 px radius, icon column), quotes, toggles (`<details>`, toggle headings), bulleted, numbered
+(decimal, letters, roman by depth) and to-do lists, code blocks and inline code, tables, columns
+(46 px gap, stacked under 600 px), bookmark cards, page links with their icon, a table of
+contents, image captions and alignment. Text colours and highlights, block colours and the
+callout background use Notion's nine colours in its light palette, and its dark palette under
+`prefers-color-scheme: dark`. Per-page options are honoured: full width, small text, serif/mono.
+Covers and uploaded icons go through the same image proxy as image blocks
+(`/img/content/<ws>/<slug>/<pageId>?k=cover|icon`, only for the link's own root page). The CSS
+budget is 10 KB (it was 3 KB for the plain layout), asserted in `test/render/page.test.ts`.
+
+Not rendered like Notion (they stay "Open in Notion" links or plain text): syntax highlighting in
+code blocks, equations, embeds and video, files and PDFs, synced blocks, inline databases
+(`collection_view`), external object mentions, bookmark thumbnails, the top bar.
+
 ## Measured (2026-11-10, local production build, no CDN, real Notion)
 
 Page `thsm` (`/thsm/our-trips/read`), the owner's test page, 18 blocks:
@@ -84,7 +103,7 @@ Page `thsm` (`/thsm/our-trips/read`), the owner's test page, 18 blocks:
 |---|---|---|
 | HTML, uncompressed | 6,684 B | 22.7 KB |
 | HTML on the wire (gzip) | 2,586 B (brotli 2,029 B) | about 7,060 B |
-| First-party JS/CSS | 0 B (CSS is 2.9 KB, inline) | 1,322,907 B brotli |
+| First-party JS/CSS | 0 B (CSS is 6.9 KB raw, 2.1 KB brotli, inline; measured before the Notion restyle: 2.9 KB) | 1,322,907 B brotli |
 | Requests | 1 (+ favicon from the browser) | many |
 | TTFB, uncached render (3 runs) | 0.24 to 0.28 s | 0.39 to 0.43 s (curl, this host) |
 

@@ -6,9 +6,17 @@ import {
   renderFastPage,
   unwrapRecordMap,
   type FastPageInput,
+  type PageHero,
 } from '../../src/render';
 import { THSM_ID, readFixture, testCtx } from './helpers';
 
+const NO_HERO: PageHero = {
+  icon: null,
+  cover: null,
+  fullWidth: false,
+  smallText: false,
+  font: 'sans',
+};
 const ORIGIN = 'https://x.vercel.app';
 const NOTION_URL = `https://thsm.notion.site/${THSM_ID.replaceAll('-', '')}`;
 
@@ -30,6 +38,7 @@ function thsmInput(overrides: Partial<FastPageInput> = {}): FastPageInput {
     editedAt: '2026-11-10T12:00:00.000Z',
     createdAt: '2026-11-09T12:00:00.000Z',
     body,
+    hero: NO_HERO,
     ...overrides,
   };
 }
@@ -80,10 +89,10 @@ describe('renderFastPage (thsm)', () => {
     expect(ld.dateModified).toBe('2026-11-10T12:00:00.000Z');
   });
 
-  test('size budget: first response <= 14 KB brotli, CSS <= 3 KB', () => {
+  test('size budget: first response <= 14 KB brotli, CSS <= 10 KB', () => {
     const compressed = brotliCompressSync(Buffer.from(html)).length;
     expect(compressed).toBeLessThanOrEqual(14 * 1024);
-    expect(Buffer.byteLength(CRITICAL_CSS)).toBeLessThanOrEqual(3 * 1024);
+    expect(Buffer.byteLength(CRITICAL_CSS)).toBeLessThanOrEqual(10 * 1024);
     expect(CRITICAL_CSS).not.toMatch(/url\(|@import|@font-face/);
   });
 
