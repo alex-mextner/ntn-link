@@ -8,8 +8,8 @@ import { getService, linkCacheTag } from '@/lib/service';
 import { errorResponse } from '@/lib/http';
 import { isPlausibleLinkPath } from '@/lib/link-path';
 
-/** Room for the 10 s database warm-up (Neon scale-to-zero, see PostgresStore) plus the request's own work. */
-export const maxDuration = 30;
+/** Room for the 10 s database warm-up (Neon scale-to-zero, see PostgresStore) plus the request's own work (Notion calls have 10 s deadlines). */
+export const maxDuration = 60;
 
 const CACHE_CONTROL = 'public, max-age=0, s-maxage=3600, stale-while-revalidate=86400';
 const NOT_FOUND_CACHE_CONTROL = 'public, max-age=0, s-maxage=60';

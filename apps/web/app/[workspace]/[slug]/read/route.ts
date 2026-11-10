@@ -15,7 +15,8 @@ import { getService, linkCacheTag } from '@/lib/service';
 
 /**
  * Room for the 10 s database warm-up (Neon scale-to-zero, see PostgresStore) plus paging
- * through Notion chunks (up to 40 sequential requests with their own deadlines).
+ * through Notion chunks (each fetch has a 10 s deadline; a page of very many slow chunks can
+ * still run past this).
  */
 export const maxDuration = 60;
 

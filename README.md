@@ -123,7 +123,7 @@ Environment variables (Production and Preview; see [Environment](#environment)):
      without an answer, the store sends an idempotent `SELECT 1` with a 10 s deadline (shared by
      concurrent callers, a failure is `502 upstream_error`, logged as `WARMUP`/`warmup-timeout`);
      real statements keep their 3 s deadline and are never retried. Routes that touch storage set
-     `maxDuration = 30` (60 for the ones that page through Notion) to leave room for it; the
+     `maxDuration = 60` (the 10 s warm-up plus the request's own Notion calls) to leave room for it; the
      extension's explicit actions wait up to 20 s for the same reason.
   2. `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`, or `KV_REST_API_URL` +
      `KV_REST_API_TOKEN`. Each field is resolved on its own and the `UPSTASH_*` value wins, so a

@@ -25,6 +25,13 @@ export interface StoreHarness {
   dispose?: () => Promise<void>;
   /** Remaining lifetime in whole seconds; null for a missing key or one without expiry. */
   ttlSecondsOf?: (key: string) => Promise<number | null>;
+  /**
+   * At most this many calls in flight in the case that fires hundreds of them at one namespace
+   * (default: all at once). A remote database behind a per-request HTTP connection (Neon free
+   * plan) cannot even answer 220 plain reads at once inside the production 3 s deadline, so
+   * its run keeps the production deadline and bounds the burst instead.
+   */
+  maxParallelism?: number;
 }
 
 const moveOf = (s: { setKey: string; from: string; to: string }, value = 'new') => ({
@@ -48,6 +55,32 @@ export async function eventually(check: () => Promise<void>, timeoutMs = 5000): 
       await Bun.sleep(100);
     }
   }
+}
+
+/** Runs `count` calls with at most `width` in flight; results in call order. */
+export async function allWithin<T>(
+  count: number,
+  width: number,
+  make: (i: number) => Promise<T>,
+): Promise<T[]> {
+  const results: T[] = Array.from({ length: count });
+  let next = 0;
+  let failure: { error: unknown } | undefined;
+  // A failed call stops the scheduling, and every worker is awaited before the error is
+  // rethrown, so nothing is still writing when the harness cleans up.
+  const workers = Array.from({ length: Math.min(width, count) }, async () => {
+    while (next < count && failure === undefined) {
+      const i = next++;
+      try {
+        results[i] = await make(i);
+      } catch (error) {
+        failure ??= { error };
+      }
+    }
+  });
+  await Promise.all(workers);
+  if (failure !== undefined) throw failure.error;
+  return results;
 }
 
 const all = <T>(count: number, make: (i: number) => Promise<T>): Promise<T[]> =>
@@ -455,7 +488,9 @@ export function defineStoreContract(
         const repo = new Repository(store);
         const ws = fresh();
         const over = API_LIMITS.linksPerNamespace + 20;
-        const results = await all(over, (i) => repo.createLink(linkRecord(ws, `s${i}`)));
+        const results = await allWithin(over, h.maxParallelism ?? over, (i) =>
+          repo.createLink(linkRecord(ws, `s${i}`)),
+        );
         expect(count(results, 'created')).toBe(API_LIMITS.linksPerNamespace);
         expect(count(results, 'full')).toBe(20);
         expect(await repo.listLinkSlugs(ws)).toHaveLength(API_LIMITS.linksPerNamespace);

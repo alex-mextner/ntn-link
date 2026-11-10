@@ -76,7 +76,7 @@ Concurrency: max 4 agents. Wave A is slices 1-4 exactly. Slice 5 starts when a s
 - [ ] **Step 1: Generate the contract file**
 
 ```bash
-cd /home/ultra/work/ntn-link
+cd "$(git rev-parse --show-toplevel)"
 {
   echo '# Foundation contract (generated from main at' "$(git rev-parse --short HEAD)"')'
   for f in packages/core/src/api-types.ts packages/core/src/index.ts; do echo; echo "## $f"; echo '```ts'; cat "$f"; echo '```'; done

@@ -10,10 +10,15 @@ import { neonHttpExecutor } from '../src/sql-executor';
 import { sqlHarness } from './support/sql-harness';
 import { defineStoreContract } from './store-contract';
 
-/** 220 parallel creations on one namespace measured 36 s end to end on Neon (lock queue + HTTP). */
-const PARALLEL_QUEUE_DEADLINE_MS = 90_000;
+/**
+ * The store runs with its production deadline. 220 calls at once do not fit it on the free
+ * plan (even 220 plain reads at once time out: every call is its own HTTPS connection to a
+ * 0.25 vCPU compute), so the burst is bounded; the cap invariants are asserted unchanged.
+ */
+const BURST_WIDTH = 20;
 
-setDefaultTimeout(PARALLEL_QUEUE_DEADLINE_MS + 30_000);
+/** The bounded burst of 220 calls takes longer than bun's 5 s default per test. */
+setDefaultTimeout(60_000);
 
 const url = databaseUrlFromEnv(process.env);
 const executor = url ? neonHttpExecutor(url) : null;
@@ -22,7 +27,7 @@ defineStoreContract(
   'PostgresStore on Neon',
   () => {
     if (!executor) throw new Error('unreachable: the suite is skipped without DATABASE_URL');
-    return sqlHarness(executor, PARALLEL_QUEUE_DEADLINE_MS);
+    return sqlHarness(executor, BURST_WIDTH);
   },
   { skip: executor === null },
 );

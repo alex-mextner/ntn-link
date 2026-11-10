@@ -459,6 +459,25 @@ describe('PostgresStore warm-up (Neon scale-to-zero)', () => {
     expect(inner.statements[0]?.text).toBe('SELECT 1 AS outcome');
   });
 
+  test('a database that suspends again while the instance lives is woken by the next call after the idle gap', async () => {
+    let now = 0;
+    const { executor, state } = sleepy(120);
+    const store = new PostgresStore({
+      executor,
+      timeoutMs: 50,
+      warmupTimeoutMs: 1000,
+      idleMs: 240_000,
+      now: () => now,
+    });
+    expect(await store.set('k', 'v')).toBe(true); // cold start, woken by the first warm-up
+    now += 1000;
+    expect(await store.get('k')).toBe('v');
+    state.cold = true; // Neon suspended; the instance does not know yet
+    now += 300_000;
+    expect(await store.get('k')).toBe('v'); // slower than 50 ms, yet inside the warm-up's deadline
+    expect(state.cold).toBe(false);
+  });
+
   test('concurrent first calls share one warm-up', async () => {
     const { executor, inner } = sleepy(60);
     const store = new PostgresStore({ executor, timeoutMs: 50, warmupTimeoutMs: 1000 });
