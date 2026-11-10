@@ -29,7 +29,7 @@ import type { PageFetcher, PageFetchResult } from './notion-fetcher';
 import { isNotionGeneratedCardUrl, isNotionPlaceholderImageUrl } from './notion-placeholder';
 import { parseNotionUrl, canonicalNotionUrl, isUsableWorkspace } from './notion-url';
 import { renderGoneHtml, renderRedirectHtml } from './og-html';
-import { loadCardExcerpt } from './render/excerpt';
+import { loadCardPage, loadPageEmoji, type CardPage } from './render/card-page';
 import {
   isOwner,
   issueChallenge,
@@ -56,6 +56,7 @@ const PAGE_LOCK_WAIT_ATTEMPTS = 50;
  */
 export const CARD_CACHE_TTL_MS = 60 * 1000;
 const CARD_CACHE_ENTRIES = 500;
+const REDIRECT_ICON_TIMEOUT_MS = 1500;
 
 export interface ServiceDeps {
   store: Store;
@@ -68,10 +69,15 @@ export interface ServiceDeps {
   /** Overrides of `DEFAULT_SWEEP_BUDGET`, mainly for tests. */
   sweepBudget?: Partial<SweepBudget>;
   /**
-   * First lines of a page's text for the card of a page without a cover; must resolve to
-   * `[]` rather than reject. Defaults to reading them from Notion.
+   * Text start and icon of a page for the card of a page without a cover; must resolve to an
+   * empty `CardPage` rather than reject. Defaults to reading them from Notion.
    */
-  loadExcerpt?: (workspace: string, pageId: string) => Promise<string[]>;
+  loadCardPage?: (workspace: string, pageId: string) => Promise<CardPage>;
+  /**
+   * The emoji icon of a page for the redirect stub (no picture download), null when it has none.
+   * Defaults to reading it from Notion; a rejection counts as null.
+   */
+  loadPageEmoji?: (workspace: string, pageId: string) => Promise<string | null>;
 }
 
 /** Who is calling a link-mutating endpoint. */
@@ -121,11 +127,11 @@ export interface Service {
    */
   cardSource(workspace: string, slug: string): Promise<CardSource | null>;
   /**
-   * Leading text lines of a page, drawn on the generated card. Takes the page id of the
+   * Text start and icon of a page, drawn on the generated card. Takes the page id of the
    * `cardSource` snapshot (not the slug), so a slug recreated for another page in between can
-   * never pair one page's title with another's text; `[]` when Notion does not answer.
+   * never pair one page's title with another's content; empty when Notion does not answer.
    */
-  pageExcerpt(workspace: string, pageId: string): Promise<string[]>;
+  pageCard(workspace: string, pageId: string): Promise<CardPage>;
   /** The stored link for the fast variant; null when missing or no longer public. */
   getLink(workspace: string, slug: string): Promise<LinkRecord | null>;
   readonly store: Store;
@@ -206,8 +212,10 @@ export function createService(deps: ServiceDeps): Service {
   const repo = new Repository(deps.store);
   const now = deps.now ?? (() => new Date());
   const purgeEdge = deps.purge ?? (async () => {});
-  const loadExcerpt =
-    deps.loadExcerpt ?? ((workspace, pageId) => loadCardExcerpt({ workspace, pageId }));
+  const loadPage =
+    deps.loadCardPage ?? ((workspace, pageId) => loadCardPage({ workspace, pageId }));
+  const loadEmoji =
+    deps.loadPageEmoji ?? ((workspace, pageId) => loadPageEmoji({ workspace, pageId }));
   // The image URL Notion currently serves for a link; memory only, never stored (it is signed
   // and expires). Resolved per page id, so a recreated slug never inherits it.
   const cardImages = new TtlCache<string | null>({
@@ -233,6 +241,20 @@ export function createService(deps: ServiceDeps): Service {
   const purge = async (workspace: string, slug: string): Promise<void> => {
     cardImages.delete(`${workspace}/${slug}`);
     await purgeEdge(workspace, slug);
+  };
+  /**
+   * The page's emoji icon for the redirect stub, or null. Crawlers wait for this page, so the
+   * lookup is bounded: past `REDIRECT_ICON_TIMEOUT_MS` the stub is served without an icon (the
+   * edge cache then holds that version for its TTL).
+   */
+  const redirectEmoji = async (workspace: string, pageId: string): Promise<string | null> => {
+    const { promise: timedOut, resolve } = Promise.withResolvers<null>();
+    const timer = setTimeout(() => resolve(null), REDIRECT_ICON_TIMEOUT_MS);
+    try {
+      return await Promise.race([loadEmoji(workspace, pageId).catch(() => null), timedOut]);
+    } finally {
+      clearTimeout(timer);
+    }
   };
   const ownership: OwnershipDeps = {
     repo,
@@ -375,6 +397,11 @@ export function createService(deps: ServiceDeps): Service {
       const claimed = (await repo.getNamespace(page.workspace)) !== null;
       const owner = await isOwner(repo, page.workspace, ownerKey);
       const meta = page.metadata;
+      // Only a cover-less page gets the generated card, so only then is its content needed.
+      const content: CardPage =
+        meta.imageUrl === null
+          ? await loadPage(page.workspace, page.pageId)
+          : { excerpt: [], icon: null };
       return {
         workspace: page.workspace,
         pageId: page.pageId,
@@ -385,7 +412,8 @@ export function createService(deps: ServiceDeps): Service {
           imageUrl: meta.imageUrl === null ? null : withImageWidth(meta.imageUrl, CARD_IMAGE_WIDTH),
           language: meta.language,
         },
-        excerpt: meta.imageUrl === null ? await loadExcerpt(page.workspace, page.pageId) : [],
+        excerpt: content.excerpt,
+        icon: content.icon,
         proposedSlug: await proposeSlug(page.workspace, meta.title),
         namespaceClaimed: claimed,
         needsVerification: !owner,
@@ -512,6 +540,7 @@ export function createService(deps: ServiceDeps): Service {
         // Rebuilt from validated parts, never taken from stored free text.
         targetUrl: canonicalNotionUrl(record.workspace, record.pageId),
         language: record.language,
+        emoji: await redirectEmoji(workspace, record.pageId),
       });
       return { kind: 'page', html, needsRefresh: stale };
     },
@@ -582,7 +611,7 @@ export function createService(deps: ServiceDeps): Service {
       };
     },
 
-    pageExcerpt: (workspace, pageId) => loadExcerpt(workspace, pageId),
+    pageCard: (workspace, pageId) => loadPage(workspace, pageId),
 
     async getLink(workspace, slug) {
       const record = await repo.getLink(workspace, slug);

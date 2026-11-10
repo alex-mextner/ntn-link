@@ -7,8 +7,16 @@
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { CardIcon } from '@ntn-link/core';
 import { ImageResponse } from 'next/og';
-import { CARD_TEXT_SIZE, CARD_TITLE_SIZE, planCardText } from './card-layout';
+import { emojiDataUri } from './emoji-picture';
+import {
+  CARD_ICON_GAP,
+  CARD_ICON_SIZE,
+  CARD_TEXT_SIZE,
+  CARD_TITLE_SIZE,
+  planCardText,
+} from './card-layout';
 
 // Distinct family names, chained in `fontFamily`: satori only falls back between families,
 // two subsets registered under one name leave the second one unused.
@@ -64,6 +72,24 @@ export interface TitleCardContent {
   description: string;
   /** Leading lines of the page's text; the description stands in when there are none. */
   excerpt: readonly string[];
+  /** The page's icon, drawn in front of the workspace label above the title. */
+  icon: CardIcon | null;
+}
+
+/**
+ * The image the icon is drawn from; null when there is none, or no picture for the emoji.
+ * The icon is decoration: if the emoji pictures cannot be read (a deployment that lost them),
+ * the card is still served, without it, and the problem is logged.
+ */
+async function iconSource(icon: CardIcon | null): Promise<string | null> {
+  if (icon === null) return null;
+  if (icon.kind === 'image') return icon.dataUri;
+  try {
+    return await emojiDataUri(icon.emoji);
+  } catch (error) {
+    console.error('Emoji pictures are unavailable; drawing the card without the icon', error);
+    return null;
+  }
 }
 
 export async function renderTitleCard(
@@ -71,7 +97,15 @@ export async function renderTitleCard(
   workspace: string,
   headers: Record<string, string>,
 ): Promise<ImageResponse> {
-  const { title, lines } = planCardText(content.title, content.excerpt, content.description);
+  const iconSrc = await iconSource(content.icon);
+  const { title, lines } = planCardText(
+    content.title,
+    content.excerpt,
+    content.description,
+    // Reserved whenever the page has an icon, drawn or not, so the preview (which cannot know
+    // whether a picture exists for the emoji) always plans the same lines.
+    content.icon !== null,
+  );
   return new ImageResponse(
     <div
       style={{
@@ -89,21 +123,37 @@ export async function renderTitleCard(
         fontFamily: FONT_STACK,
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          alignSelf: 'flex-start',
-          height: 40,
-          padding: '0 18px',
-          fontSize: 24,
-          color: '#c9c9de',
-          background: 'rgba(255,255,255,0.08)',
-          border: '1px solid rgba(255,255,255,0.16)',
-          borderRadius: 20,
-        }}
-      >
-        {workspace}.notion.site
+      {/* The workspace label, with the page's own icon (Twemoji emoji or its picture) in front. */}
+      <div style={{ display: 'flex', alignItems: 'center', alignSelf: 'flex-start' }}>
+        {iconSrc === null ? null : (
+          <img
+            src={iconSrc}
+            width={CARD_ICON_SIZE}
+            height={CARD_ICON_SIZE}
+            style={{
+              width: CARD_ICON_SIZE,
+              height: CARD_ICON_SIZE,
+              marginRight: CARD_ICON_GAP,
+              // A picture icon is a rounded square as on Notion; an emoji has its own outline.
+              ...(content.icon?.kind === 'image' ? { borderRadius: 20, objectFit: 'cover' } : {}),
+            }}
+          />
+        )}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            height: 40,
+            padding: '0 18px',
+            fontSize: 24,
+            color: '#c9c9de',
+            background: 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(255,255,255,0.16)',
+            borderRadius: 20,
+          }}
+        >
+          {workspace}.notion.site
+        </div>
       </div>
       {/* Fixed-height regions with clipping: a long or unbroken title can never push past the
           630 px frame or over the workspace label, whatever the glyph widths. The excerpt is

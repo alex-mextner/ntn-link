@@ -122,6 +122,12 @@ export function createController(
     }
   });
 
+  /** True when the browser holds a key for `workspace` other than the one the preview carried. */
+  function isKeyUntested(workspace: string, sentKey: string | null): boolean {
+    const stored = keyFor(workspace);
+    return stored !== null && stored !== sentKey;
+  }
+
   async function loadPreview() {
     // A restarted preview invalidates everything still in flight for this URL.
     flow += 1;
@@ -136,7 +142,11 @@ export function createController(
     try {
       const preview = await api.preview(url, key, abort.signal);
       if (abort.signal.aborted) return;
-      store.dispatch({ type: 'preview_loaded', preview });
+      store.dispatch({
+        type: 'preview_loaded',
+        preview,
+        keyUntested: isKeyUntested(preview.workspace, key),
+      });
     } catch (error) {
       if (abort.signal.aborted) return;
       store.dispatch({ type: 'preview_failed', error: toFlowError(error) });
@@ -271,6 +281,8 @@ export function createController(
     const { workspace, slug } = result.link;
     const key = keyFor(workspace);
     if (!key) return;
+    if (state().fastSaving) return;
+    store.dispatch({ type: 'link_fast_started' });
     try {
       const { link } = await api.updateLink(workspace, slug, { fast }, key);
       store.dispatch({ type: 'link_fast_changed', workspace, slug, fast: link.fast });

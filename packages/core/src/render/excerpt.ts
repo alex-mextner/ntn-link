@@ -7,7 +7,6 @@
  * columns are read left to right. Pictures, dividers and inline databases carry no text and are
  * skipped. The result is bounded, so it is safe to put into an API response.
  */
-import { loadPageStart, dashedId } from './page-chunk';
 import { plainTextOf, type NotionBlock, type RecordMap } from './records';
 
 export const EXCERPT_LIMITS = { maxLines: 8, maxLineChars: 140, maxTotalChars: 700 } as const;
@@ -72,23 +71,4 @@ export function cardExcerpt(map: RecordMap, rootId: string): string[] {
   const out: Collected = { lines: [], total: 0, number: 0 };
   collect(map, map.blocks.get(rootId)?.content ?? [], 0, out);
   return out.lines;
-}
-
-export interface LoadCardExcerptArgs {
-  workspace: string;
-  pageId: string;
-  fetchImpl?: typeof fetch;
-}
-
-/**
- * Excerpt of a public page, read from the first chunk of Notion's page data only. Any failure
- * yields no lines: the card is decoration, and a Notion hiccup must not turn it into an error.
- */
-export async function loadCardExcerpt(args: LoadCardExcerptArgs): Promise<string[]> {
-  try {
-    const map = await loadPageStart(args);
-    return cardExcerpt(map, dashedId(args.pageId));
-  } catch {
-    return [];
-  }
 }

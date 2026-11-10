@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { CLIPBOARD_TIMEOUT_MS, raceDeadline } from '@/lib/client/deadline';
 import { en } from '@/lib/client/strings';
-import { CheckIcon, CopyIcon } from './icons';
+import { CheckIcon, CopyIcon, SpinnerIcon } from './icons';
 
 /** Copies `text`, shows a check mark for a moment and announces the result in a polite live region. */
 export function CopyButton({ text, label }: { text: string; label: string }) {
-  const [status, setStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [status, setStatus] = useState<'idle' | 'copying' | 'copied' | 'failed'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -17,8 +18,13 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   );
 
   async function copy() {
+    if (status === 'copying') return;
+    // A reset timer of the previous copy must not end this one early.
+    if (timer.current) clearTimeout(timer.current);
+    setStatus('copying');
     try {
-      await navigator.clipboard.writeText(text);
+      // The clipboard can wait on a permission prompt that never comes: give up and say so.
+      await raceDeadline(navigator.clipboard.writeText(text), CLIPBOARD_TIMEOUT_MS);
       setStatus('copied');
     } catch {
       setStatus('failed');
@@ -27,6 +33,8 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
     timer.current = setTimeout(() => setStatus('idle'), 2500);
   }
 
+  const copying = status === 'copying';
+  const buttonLabel = status === 'copied' ? en.copied : copying ? en.copying : en.copy;
   return (
     <span className="copy">
       <button
@@ -35,13 +43,27 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
         data-state={status}
         data-return-focus=""
         onClick={copy}
-        aria-label={`${status === 'copied' ? en.copied : en.copy}: ${label}`}
+        aria-busy={copying ? true : undefined}
+        aria-disabled={copying ? true : undefined}
+        aria-label={`${buttonLabel}: ${label}`}
       >
-        {status === 'copied' ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
-        <span className="btn-label">{status === 'copied' ? en.copied : en.copy}</span>
+        {copying ? (
+          <SpinnerIcon size={16} />
+        ) : status === 'copied' ? (
+          <CheckIcon size={16} />
+        ) : (
+          <CopyIcon size={16} />
+        )}
+        <span className="btn-label">{buttonLabel}</span>
       </button>
       <span className="visually-hidden" role="status">
-        {status === 'copied' ? en.copied : status === 'failed' ? en.copyFailed : ''}
+        {copying
+          ? en.announce.copying
+          : status === 'copied'
+            ? en.copied
+            : status === 'failed'
+              ? en.copyFailed
+              : ''}
       </span>
       {status === 'failed' ? <span className="field-error">{en.copyFailed}</span> : null}
     </span>

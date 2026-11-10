@@ -48,8 +48,8 @@ export async function GET(
         });
       }
     }
-    const excerpt = await getService().pageExcerpt(workspace, source.pageId);
-    return await renderTitleCard({ ...source, excerpt }, workspace, headers);
+    const { excerpt, icon } = await getService().pageCard(workspace, source.pageId);
+    return await renderTitleCard({ ...source, excerpt, icon }, workspace, headers);
   } catch (error) {
     return errorResponse(error);
   }
