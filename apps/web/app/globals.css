@@ -1528,4 +1528,48 @@ textarea.input {
     color: CanvasText;
     background: none;
   }
+
+  body::before,
+  body::after {
+    display: none;
+  }
+
+  .step:not(:last-child)::after {
+    background: GrayText;
+  }
+
+  .step[data-status='done']:not(:last-child)::after {
+    background: ButtonText;
+  }
+
+  /* State must survive the loss of gradients: say it with system colours only. */
+  .switch-track {
+    background: Canvas;
+    border-color: ButtonText;
+  }
+
+  .switch-track::after {
+    background: ButtonText;
+  }
+
+  .switch input:checked + .switch-track {
+    background: Highlight;
+    border-color: Highlight;
+  }
+
+  .switch input:checked + .switch-track::after {
+    background: HighlightText;
+  }
+
+  .segment input:checked + span,
+  .step[data-status='current'] .step-dot,
+  .step[data-status='busy'] .step-dot {
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .btn-primary {
+    background: ButtonFace;
+    color: ButtonText;
+  }
 }
