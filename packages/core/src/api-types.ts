@@ -28,7 +28,7 @@
  * Public routes (not JSON API)
  *   GET /<ws>/<slug>        200 HTML with OG tags and an immediate redirect to Notion
  *   GET /<ws>/<slug>/read   fast static copy of the page
- *   GET /img/<ws>/<slug>    1200x630 card image (proxied Notion image or generated card)
+ *   GET /img/<ws>/<slug>    card image (proxied Notion image or generated card)
  */
 
 export const ERROR_CODES = [

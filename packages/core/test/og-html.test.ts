@@ -22,6 +22,8 @@ describe('renderRedirectHtml', () => {
     expect(out).toContain('<meta property="og:url" content="https://ntn.link/thsm/our-trips">');
     expect(out).toContain('<meta property="og:locale" content="ru_RU">');
     expect(out).toContain('<meta name="twitter:card" content="summary_large_image">');
+    expect(out).not.toContain('og:image:width');
+    expect(out).not.toContain('og:image:height');
     expect(out).toContain(
       '<meta http-equiv="refresh" content="0;url=https://thsm.notion.site/413d447ac4b180169985c93eea7f02f9">',
     );

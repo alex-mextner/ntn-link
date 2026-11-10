@@ -73,7 +73,7 @@ Public routes:
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /<ws>/<slug>`      | `200` HTML with OG tags and refresh to Notion (`410` once the Notion page is no longer public, `404` unknown). `Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400`, tagged `ntn-<ws>-<slug>` via `Vercel-Cache-Tag`; stale cards are refreshed in the background after 24 h |
 | `GET /<ws>/<slug>/read` | Fast copy of the page (static HTML)                                                                                                                                                                                                                                                                     |
-| `GET /img/<ws>/<slug>`  | 1200x630 image: the page's Notion social image fetched fresh from Notion at request time (signed URLs expire, so only the bytes are CDN-cached), otherwise a generated title card (bundled Noto Sans, Cyrillic supported)                                                                               |
+| `GET /img/<ws>/<slug>`  | Card image: the page's Notion social image (PNG or JPEG, passed through unchanged, 1200 px wide requested) fetched fresh from Notion at request time (signed URLs expire, so only the bytes are CDN-cached), otherwise a generated 1200x630 title card (bundled Noto Sans, Cyrillic supported)          |
 
 Link changes purge the CDN by cache tag on Vercel (`dangerouslyDeleteByTag`) and revalidate the
 `/read` path; elsewhere the purge is a no-op.
@@ -92,8 +92,52 @@ that this process itself issued via `/api/challenge` appended. Consequences, sta
   `500 server_misconfigured`. Run it with `bun run dev` (or another non-production `NODE_ENV`).
 - State lives in process memory only.
 
-## Deploying
+## Deploying to Vercel
 
-Vercel project settings are in `apps/web/vercel.json` (Bun `1.x`, `fra1`); set the project's Root Directory to `apps/web` (Next is installed there; "include files outside the root directory" must stay on for `packages/core`). This layout has not been deployed yet. Set `PUBLIC_ORIGIN` and the
-Upstash variables (plus optionally `ADMIN_TOKEN`) for the Production and Preview environments.
+Project settings (`apps/web/vercel.json` carries the framework, install/build commands and region):
+
+| Setting         | Value                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------ |
+| Root Directory  | `apps/web`, with "Include source files outside of the Root Directory" on (`packages/core`) |
+| Node.js version | `24.x`                                                                                     |
+| Install command | `bun install --frozen-lockfile`                                                            |
+| Build command   | `bun run build`                                                                            |
+| Function region | `fra1`                                                                                     |
+
+Environment variables (Production and Preview; see [Environment](#environment)):
+
+- `PUBLIC_ORIGIN`: the public origin, e.g. `https://ntn.link`.
+- `ADMIN_TOKEN`: optional, enables operator delete; mark it sensitive.
+- The store pair: `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`, or `KV_REST_API_URL` +
+  `KV_REST_API_TOKEN`. Each field is resolved on its own and the `UPSTASH_*` value wins, so a pair
+  from two different stores is possible; set one pair only. Without a store, production routes
+  answer `500 server_misconfigured`.
+
+Create the store through the Upstash Redis integration of the Vercel Marketplace; the project owner
+has to accept Upstash's terms in that step, which an agent cannot do for them. Do not set
+`NTN_TEST_FETCHER` on Vercel (see the caveat above).
+
+Ownership flow: `POST /api/challenge` returns a public `nonce` and a private `claimToken`; the owner
+puts the nonce into the title of a public page of the workspace, then `POST /api/verify` with the
+`claimToken` issues the owner key (shown once). The `claimToken` is never put on a page.
+
+Operations:
+
+- Every storage request has a 3 s deadline; a backend that does not answer ends as `502
+upstream_error`.
+- Storage failures log one JSON line to stderr, `{"event":"storage_failure","command","errorClass","kind","message"}`,
+  without keys, values or URLs; identical lines are limited to one per 10 s.
+- `POST /api/ns/<ws>/sweep` (or `ntn-link sweep <workspace>`) removes links whose Notion page is
+  gone. It is time-bounded; repeat until `cleanupComplete: true`.
+
+Limits: at most 200 links per namespace. Rate limits are per client IP (fixed windows):
+
+| Action      | Limit      |
+| ----------- | ---------- |
+| `preview`   | 30 / 60 s  |
+| `links`     | 30 / 60 s  |
+| `challenge` | 10 / 600 s |
+| `verify`    | 20 / 600 s |
+| `sweep`     | 10 / 600 s |
+
 Run `bun run smoke:notion` after changing anything that parses Notion output.

@@ -59,6 +59,8 @@ describe('renderFastPage (thsm)', () => {
 
   test('Open Graph and Twitter tags match the redirect card', () => {
     expect(html).toContain(`<meta property="og:image" content="${ORIGIN}/img/thsm/our-trips">`);
+    expect(html).not.toContain('og:image:width');
+    expect(html).not.toContain('og:image:height');
     expect(html).toContain('<meta name="twitter:card" content="summary_large_image">');
     expect(html).toContain('<meta property="og:type" content="article">');
     expect(html).toContain('<meta property="og:locale" content="ru_RU">');

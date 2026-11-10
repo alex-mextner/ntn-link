@@ -50,8 +50,6 @@ function metaTags(input: FastPageInput, selfUrl: string): string {
       ? [`<meta name="twitter:card" content="summary">`]
       : [
           `<meta property="og:image" content="${image}">`,
-          `<meta property="og:image:width" content="1200">`,
-          `<meta property="og:image:height" content="630">`,
           `<meta name="twitter:card" content="summary_large_image">`,
           `<meta name="twitter:image" content="${image}">`,
         ]),
