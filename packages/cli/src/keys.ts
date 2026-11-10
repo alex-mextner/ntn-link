@@ -4,11 +4,13 @@
  *
  * - Keyed by origin so pointing --origin at another server can never send it a key that
  *   was issued by (and only means something to) the production service.
- * - Dir 0700, file 0600, atomic replace, and a directory lock around every mutation (save and
+ * - Dir 0700, file 0600, atomic replace, and a lock file around every mutation (save and
  *   corruption quarantine) so concurrent runs cannot drop or move each other's key.
- * - The lock is never reclaimed automatically: guessing that a holder died cannot be made safe
- *   without OS-level locks, and the critical section is a few synchronous file operations. If a
- *   run is killed inside it, saving fails after a bounded wait and names the directory to delete.
+ * - A lock records pid, host and time. One left by a killed run is reclaimed when its holder is
+ *   provably gone (see lock.ts); a live holder is waited for, boundedly, and the error names the
+ *   file to delete.
+ * - `withFlow` serializes whole verification flows of one origin+workspace across processes, so
+ *   two overlapping rotations cannot leave the key that lost the race on disk.
  * - A damaged file is moved aside rather than overwritten: it may hold the only copy of a key
  *   the user can recover by hand.
  */
@@ -23,11 +25,11 @@ import {
   openSync,
   readFileSync,
   renameSync,
-  rmdirSync,
   writeFileSync,
 } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
+import { type Holder, withLock, withLockAsync } from './lock';
 
 export interface KeyStore {
   get(origin: string, ws: string): string | null;
@@ -36,6 +38,16 @@ export interface KeyStore {
    * slow run cannot overwrite a newer key another run saved meanwhile. Returns whether it saved.
    */
   set(origin: string, ws: string, key: string, ifCurrentIs?: string | null): boolean;
+  /**
+   * Runs a verification flow while holding the cross-process lock of one origin+workspace; a
+   * second flow for the same workspace waits (calling `onWait` once) until the first one is done.
+   */
+  withFlow<T>(
+    origin: string,
+    ws: string,
+    action: () => Promise<T>,
+    onWait?: (holder: Holder | null) => void,
+  ): Promise<T>;
   warnings: string[];
 }
 
@@ -48,6 +60,22 @@ type Entries = Record<string, Record<string, Entry>>;
 
 const CORRUPT = Symbol('corrupt');
 const LOCK_WAIT_MS = 5000;
+const FLOW_WAIT_MS = 10 * 60_000;
+/** Only for locks that cannot be probed; the key-file critical section is a few file operations. */
+const LOCK_STALE_MS = 2 * 60_000;
+/** Only for flow locks that cannot be probed: a challenge lives 15 minutes, verification takes up to 3 more. */
+const FLOW_STALE_MS = 30 * 60_000;
+
+export interface KeyStoreOptions {
+  /** How long a key-file mutation waits for the lock (it is held for a few file operations). */
+  lockWaitMs?: number;
+  /** How long a verification flow waits for another flow of the same workspace to finish. */
+  flowWaitMs?: number;
+  /** A key-file lock that cannot be probed (foreign host, unreadable) is reclaimed once older than this. */
+  lockStaleMs?: number;
+  /** Same for flow locks, which are held across the whole interactive verification. */
+  flowStaleMs?: number;
+}
 
 function isEntry(value: unknown): value is Entry {
   return typeof value === 'object' && value !== null && typeof (value as Entry).key === 'string';
@@ -62,35 +90,6 @@ function isEntries(value: unknown): value is Entries {
       !Array.isArray(perOrigin) &&
       Object.values(perOrigin).every(isEntry),
   );
-}
-
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/** mkdir is atomic, so its success means "I hold the lock". The wait is always bounded. */
-function withLock<T>(lockDir: string, waitMs: number, action: () => T): T {
-  const deadline = Date.now() + waitMs;
-  for (;;) {
-    try {
-      mkdirSync(lockDir, { mode: 0o700 });
-      break;
-    } catch (error) {
-      if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
-      if (Date.now() > deadline) {
-        throw new Error(
-          `the key file is locked by another ntn-link run; if none is running, delete ${lockDir}`,
-          { cause: error },
-        );
-      }
-      sleepSync(25);
-    }
-  }
-  try {
-    return action();
-  } finally {
-    rmdirSync(lockDir);
-  }
 }
 
 /** The key directory must be a real directory owned by the current user (never a link or someone else's). */
@@ -117,10 +116,13 @@ function isCode(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code;
 }
 
-export function openKeyStore(path: string, lockWaitMs = LOCK_WAIT_MS): KeyStore {
+export function openKeyStore(path: string, options: KeyStoreOptions = {}): KeyStore {
+  const { lockWaitMs = LOCK_WAIT_MS, flowWaitMs = FLOW_WAIT_MS } = options;
+  const fileLock = { staleAfterMs: options.lockStaleMs ?? LOCK_STALE_MS };
+  const flowLock = { staleAfterMs: options.flowStaleMs ?? FLOW_STALE_MS };
   const warnings: string[] = [];
   const dir = dirname(path);
-  const lockDir = join(dir, 'keys.lock');
+  const lockPath = join(dir, 'keys.lock');
 
   /**
    * Reads without side effects other than tightening the file's own permissions. The file is opened
@@ -173,7 +175,8 @@ export function openKeyStore(path: string, lockWaitMs = LOCK_WAIT_MS): KeyStore 
     get(origin, ws) {
       try {
         const first = read();
-        const entries = first === CORRUPT ? withLock(lockDir, lockWaitMs, recover) : first;
+        const entries =
+          first === CORRUPT ? withLock(lockPath, lockWaitMs, fileLock, recover) : first;
         return entries[origin]?.[ws]?.key ?? null;
       } catch (error) {
         warnings.push(
@@ -184,7 +187,7 @@ export function openKeyStore(path: string, lockWaitMs = LOCK_WAIT_MS): KeyStore 
     },
     set(origin, ws, key, ifCurrentIs) {
       securePrivateDir(dir);
-      return withLock(lockDir, lockWaitMs, () => {
+      return withLock(lockPath, lockWaitMs, fileLock, () => {
         const entries = recover();
         const current = entries[origin]?.[ws]?.key ?? null;
         if (ifCurrentIs !== undefined && current !== ifCurrentIs) return false;
@@ -195,6 +198,13 @@ export function openKeyStore(path: string, lockWaitMs = LOCK_WAIT_MS): KeyStore 
         renameSync(tmp, path);
         return true;
       });
+    },
+    withFlow(origin, ws, action, onWait) {
+      securePrivateDir(dir);
+      const name = createHash('sha256').update(`${origin}\0${ws}`).digest('hex').slice(0, 16);
+      const flowPath = join(dir, `keys.flow-${name}.lock`);
+      const what = `another ntn-link run has been verifying "${ws}" for too long`;
+      return withLockAsync(flowPath, flowWaitMs, flowLock, what, action, onWait);
     },
   };
 }

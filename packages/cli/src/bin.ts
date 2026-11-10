@@ -36,6 +36,8 @@ const io: Io = {
   isTTY: Boolean(process.stdin.isTTY && process.stderr.isTTY),
   ask,
   copy: copyToClipboard,
+  // Executor-style Promise on purpose: the bundle must run on Node 20, which lacks Promise.withResolvers.
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
 process.exitCode = await run(process.argv.slice(2), io);

@@ -471,13 +471,14 @@ test('every leftover verification code must be gone, not just the one from this 
 });
 
 test('a malformed verify response cannot poison the key file', async () => {
+  let verifyCalls = 0;
   const bad = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
     fetch: (req) => {
       const path = new URL(req.url).pathname;
       if (path === '/api/preview') {
-        return Response.json({ workspace: 'thsm', card: { title: 'T' } });
+        return Response.json({ workspace: 'thsm', pageId: 'p', card: { title: 'T' } });
       }
       if (path === '/api/challenge') {
         return Response.json({
@@ -489,6 +490,7 @@ test('a malformed verify response cannot poison the key file', async () => {
         });
       }
       if (path === '/api/verify') {
+        verifyCalls++;
         return Response.json({
           workspace: 'thsm',
           action: 'claim',
@@ -509,6 +511,7 @@ test('a malformed verify response cannot poison the key file', async () => {
     h.onAsk = () => '';
     expect(await h.exec(PAGE, '--origin', origin)).toBe(EXIT.failure);
     expect(err()).toContain('unexpected response shape');
+    expect(verifyCalls).toBe(1); // the credential check itself was exercised
     expect(openKeyStore(h.keysPath).get(h.server.origin, 'thsm')).toBe('saved-owner-key');
     expect(openKeyStore(h.keysPath).get(origin, 'thsm')).toBeNull();
   } finally {
@@ -530,4 +533,208 @@ test('a slow run cannot overwrite a newer key another run saved meanwhile', asyn
   await h.exec(PAGE);
   expect(openKeyStore(h.keysPath).get(h.server.origin, 'thsm')).toBe('newer-key-from-other-run');
   expect(err()).toContain('saved a newer key');
+});
+
+test('sweep repeats until the service reports it is done, prints only a summary on stderr', async () => {
+  ownThsm();
+  h.server.sweepAnswers.push(
+    { removedLinks: 2, cleanupComplete: false },
+    { removedLinks: 1, cleanupComplete: false },
+    { removedLinks: 0, cleanupComplete: true },
+  );
+  expect(await h.exec('sweep', 'thsm')).toBe(EXIT.ok);
+  expect(out()).toBe('');
+  const sweeps = h.server.seen.filter((s) => s.path === '/api/ns/thsm/sweep');
+  expect(sweeps).toHaveLength(3);
+  expect(sweeps.every((s) => s.method === 'POST' && s.auth === 'Bearer saved-owner-key')).toBe(
+    true,
+  );
+  expect(sweeps[0]?.body).toBeUndefined(); // empty body
+  expect(h.sleeps).toHaveLength(2); // a pause between attempts, none after the last
+  const lines = err()
+    .split('\n')
+    .filter((l) => l !== '' && !l.startsWith('log: '));
+  expect(lines).toEqual(['Swept "thsm": removed 3 link(s); cleanup complete.']);
+});
+
+test('sweep gives up after a bounded number of attempts with its own exit code', async () => {
+  ownThsm();
+  h.server.sweepAnswers.push(
+    ...Array.from({ length: 50 }, () => ({ removedLinks: 1, cleanupComplete: false })),
+  );
+  expect(await h.exec('sweep', 'thsm')).toBe(EXIT.sweepIncomplete);
+  expect(out()).toBe('');
+  expect(h.server.seen.filter((s) => s.path === '/api/ns/thsm/sweep')).toHaveLength(10);
+  expect(err()).toContain('has not finished after 10 attempts');
+  expect(err()).toContain('ntn-link sweep thsm');
+});
+
+test('sweep against a service without the route says so (404 and 405)', async () => {
+  ownThsm();
+  h.server.sweepRoute = false;
+  expect(await h.exec('sweep', 'thsm')).toBe(EXIT.sweepUnsupported);
+  expect(err()).toContain('does not support sweeping');
+  expect(out()).toBe('');
+  expect(h.server.seen.filter((s) => s.path === '/api/ns/thsm/sweep')).toHaveLength(1);
+
+  clear();
+  const methodNotAllowed = Bun.serve({
+    port: 0,
+    hostname: '127.0.0.1',
+    fetch: () => new Response('Method Not Allowed', { status: 405 }),
+  });
+  try {
+    openKeyStore(h.keysPath).set(`http://127.0.0.1:${methodNotAllowed.port}`, 'thsm', 'k');
+    expect(
+      await h.exec('sweep', 'thsm', '--origin', `http://127.0.0.1:${methodNotAllowed.port}`),
+    ).toBe(EXIT.sweepUnsupported);
+    expect(err()).toContain('HTTP 405');
+  } finally {
+    methodNotAllowed.stop(true);
+  }
+});
+
+test('sweep with a wrong key: exit 7 with the recovery hint', async () => {
+  ownThsm('real-key', 'wrong-key');
+  expect(await h.exec('sweep', 'thsm')).toBe(EXIT.unauthorized);
+  expect(err()).toContain('ntn-link <notion-url>');
+  expect(h.logFile()).not.toContain('wrong-key');
+});
+
+test('a rotation whose cleanup did not finish tells the user to run sweep', async () => {
+  ownThsm('real-key', 'stale-key');
+  h.server.verifyCleanupComplete = false;
+  expect(await h.exec(PAGE)).toBe(EXIT.ok);
+  expect(err().split('\n')).toContain('run: ntn-link sweep thsm');
+  expect(out()).toBe('https://short.test/thsm/our-trips\n');
+});
+
+test('no sweep hint when the cleanup finished', async () => {
+  ownThsm('real-key', 'stale-key');
+  expect(await h.exec(PAGE)).toBe(EXIT.ok);
+  expect(err()).not.toContain('ntn-link sweep');
+});
+
+test('a hostile workspace name never ends up in the copy-paste hint', async () => {
+  const hostile = Bun.serve({
+    port: 0,
+    hostname: '127.0.0.1',
+    fetch: async (req) => {
+      const path = new URL(req.url).pathname;
+      if (path === '/api/preview') {
+        return Response.json({
+          workspace: 'thsm',
+          pageId: 'p',
+          card: { title: 'Our trips', description: '', imageUrl: null, language: null },
+        });
+      }
+      if (path === '/api/challenge') {
+        return Response.json({
+          workspace: 'thsm',
+          action: 'claim',
+          nonce: 'ntn-verify-abcdefghij',
+          claimToken: 'tok',
+          expiresAt: '2030-01-01T00:00:00Z',
+        });
+      }
+      if (path === '/api/verify') {
+        return Response.json({
+          workspace: 'thsm',
+          action: 'claim',
+          ownerKey: 'k',
+          removedLinks: 0,
+          cleanupComplete: false,
+        });
+      }
+      return Response.json(
+        { error: { code: 'needs_verification', message: 'verify', action: 'claim' } },
+        { status: 403 },
+      );
+    },
+  });
+  try {
+    h.onAsk = () => '';
+    await h.exec(PAGE, '--origin', `http://127.0.0.1:${hostile.port}`);
+    expect(err()).toContain('run: ntn-link sweep thsm');
+    expect(err()).toContain(`--origin http://127.0.0.1:${hostile.port}`);
+  } finally {
+    hostile.stop(true);
+  }
+});
+
+test('a verification URL with a conflicting ?p= query cannot skip the clean-up of the title', async () => {
+  // Percent-encoded hyphens hide the page id from a naive local parse; the service resolves it.
+  const odd =
+    'https://thsm.notion.site/Our%2Dtrips%2D413d447ac4b180169985c93eea7f02f9?p=00000000000000000000000000000001';
+  h.onAsk = (question, stderr) => {
+    if (question.includes('gone from the title')) h.server.publishedNonces.clear();
+    else
+      for (const nonce of stderr.match(/ntn-verify-\w+/g) ?? [])
+        h.server.publishedNonces.set(nonce, odd);
+    return question.includes('gone from the title') ? '' : odd;
+  };
+  expect(await h.exec(PAGE)).toBe(EXIT.ok);
+  expect(err()).toContain('remove the code from the page title'); // same page per the service
+  expect(out()).toBe('https://short.test/thsm/our-trips\n'); // no code in slug or title
+  const previews = h.server.seen.filter((s) => s.path === '/api/preview').map((s) => s.body);
+  expect(previews).toContainEqual({ url: odd });
+});
+
+test('a verification page that really is another page needs no clean-up of the linked title', async () => {
+  const other = 'https://thsm.notion.site/Other-11111111111111111111111111111111';
+  h.onAsk = (question, stderr) => {
+    for (const nonce of stderr.match(/ntn-verify-\w+/g) ?? [])
+      h.server.publishedNonces.set(nonce, other);
+    return other;
+  };
+  expect(await h.exec(PAGE)).toBe(EXIT.ok);
+  expect(err()).not.toContain('remove the code from the page title');
+});
+
+test('two overlapping rotations of one workspace leave the key that is valid on the server', async () => {
+  ownThsm('real-key', 'stale-key');
+  // Both runs start with the same rejected key and each wants to rotate; the user takes a moment
+  // to publish the code each time.
+  h.onAsk = async (question, stderr) => {
+    if (question.includes('gone from the title')) {
+      h.server.publishedNonces.clear();
+      return '';
+    }
+    await Bun.sleep(150);
+    for (const nonce of stderr.match(/ntn-verify-\w+/g) ?? [])
+      h.server.publishedNonces.set(nonce, PAGE);
+    return '';
+  };
+  const [first, second] = await Promise.all([
+    h.exec(PAGE, '--slug', 'one'),
+    h.exec(PAGE, '--slug', 'two'),
+  ]);
+  expect([first, second]).toEqual([EXIT.ok, EXIT.ok]);
+  expect([...h.server.links.keys()].toSorted()).toEqual(['thsm/one', 'thsm/two']);
+  expect(keyOnDisk()).toBe(h.server.owners.get('thsm') ?? null);
+  expect(h.server.seen.filter((s) => s.path === '/api/verify')).toHaveLength(1);
+  expect(err()).toContain('Another ntn-link run');
+});
+
+test("a run that picks up another run's key still waits for the code to leave the linked title", async () => {
+  ownThsm('real-key', 'stale-key');
+  // The first run answers the clean-up prompt slowly; the second one gets the saved key meanwhile
+  // and must not snapshot the title that still carries the first run's code.
+  h.onAsk = async (question, stderr) => {
+    if (question.includes('gone from the title')) {
+      await Bun.sleep(300);
+      h.server.publishedNonces.clear();
+      return '';
+    }
+    for (const nonce of stderr.match(/ntn-verify-\w+/g) ?? [])
+      h.server.publishedNonces.set(nonce, PAGE);
+    return '';
+  };
+  const [first, second] = await Promise.all([
+    h.exec(PAGE, '--slug', 'one'),
+    h.exec(PAGE, '--slug', 'two'),
+  ]);
+  expect([first, second]).toEqual([EXIT.ok, EXIT.ok]);
+  for (const link of h.server.links.values()) expect(link.card.title).toBe('Our trips');
+  expect(h.server.links.size).toBe(2);
 });

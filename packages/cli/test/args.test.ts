@@ -32,6 +32,7 @@ describe('parseArgs', () => {
       kind: 'rm',
       target: 'thsm/our-trips',
     });
+    expect(parseArgs(['sweep', 'thsm'], {}).command).toEqual({ kind: 'sweep', ws: 'thsm' });
     expect(
       parseArgs(['set', 'thsm/our-trips', '--title', 'Hi', '--fast', 'off'], {}).command,
     ).toEqual({
@@ -63,6 +64,9 @@ describe('parseArgs', () => {
     [['rm', 'a/b/c']],
     [['ls']],
     [['ls', 'a/b']],
+    [['sweep']],
+    [['sweep', 'a/b']],
+    [['sweep', 'thsm', '--copy']],
     [['set', 'a/b']],
     [['set', 'a/b', '--fast', 'maybe']],
     [['set', 'a/b', '--canonical', 'x']],

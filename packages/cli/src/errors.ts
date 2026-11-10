@@ -13,26 +13,31 @@ export const EXIT = {
   rateLimited: 8,
   challenge: 9,
   network: 10,
+  sweepIncomplete: 11,
+  sweepUnsupported: 12,
 } as const;
 
-const BY_CODE: Partial<Record<ErrorCode, number>> = {
-  not_notion_url: EXIT.badPage,
-  not_public: EXIT.badPage,
-  unsupported_workspace: EXIT.badPage,
-  slug_taken: EXIT.slug,
-  slug_reserved: EXIT.slug,
-  slug_invalid: EXIT.slug,
-  unauthorized: EXIT.unauthorized,
-  needs_verification: EXIT.unauthorized,
-  namespace_claimed: EXIT.unauthorized,
-  rate_limited: EXIT.rateLimited,
-  challenge_expired: EXIT.challenge,
-  challenge_invalid: EXIT.challenge,
-  nonce_not_found: EXIT.challenge,
-};
+/** A Map, not an object: the code comes from the server and `constructor` or `__proto__` must stay unknown. */
+const CODE_EXITS: Array<[ErrorCode, number]> = [
+  ['not_notion_url', EXIT.badPage],
+  ['not_public', EXIT.badPage],
+  ['unsupported_workspace', EXIT.badPage],
+  ['slug_taken', EXIT.slug],
+  ['slug_reserved', EXIT.slug],
+  ['slug_invalid', EXIT.slug],
+  ['unauthorized', EXIT.unauthorized],
+  ['needs_verification', EXIT.unauthorized],
+  ['namespace_claimed', EXIT.unauthorized],
+  ['rate_limited', EXIT.rateLimited],
+  ['challenge_expired', EXIT.challenge],
+  ['challenge_invalid', EXIT.challenge],
+  ['nonce_not_found', EXIT.challenge],
+];
+const BY_CODE = new Map<string, number>(CODE_EXITS);
 
-export function exitCodeFor(code: ErrorCode | 'http_error'): number {
-  return code === 'http_error' ? EXIT.failure : (BY_CODE[code] ?? EXIT.failure);
+/** Takes any string: the server may send a code this client has never heard of (exit 1). */
+export function exitCodeFor(code: string): number {
+  return BY_CODE.get(code) ?? EXIT.failure;
 }
 
 /**

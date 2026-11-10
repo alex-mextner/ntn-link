@@ -42,6 +42,12 @@ export interface FakeServer {
   failNext: Forced | null;
   /** Makes created links report this redirect URL (hostile or odd server). */
   redirectUrlOverride: string | null;
+  /** What /verify reports as cleanupComplete (a rotation whose cleanup did not finish: false). */
+  verifyCleanupComplete: boolean;
+  /** Answers of consecutive sweep calls; once empty every call reports a finished cleanup. */
+  sweepAnswers: Array<{ removedLinks: number; cleanupComplete: boolean }>;
+  /** When false the sweep route does not exist (an older service). */
+  sweepRoute: boolean;
   stop(): void;
 }
 
@@ -87,6 +93,7 @@ const unauthorized = (): Response =>
 export function startFakeServer(): FakeServer {
   const challenges = new Map<string, Challenge>();
   let counter = 0;
+  let keysIssued = 0;
   const server: FakeServer = {
     origin: '',
     seen: [],
@@ -95,6 +102,9 @@ export function startFakeServer(): FakeServer {
     publishedNonces: new Map(),
     failNext: null,
     redirectUrlOverride: null,
+    verifyCleanupComplete: true,
+    sweepAnswers: [],
+    sweepRoute: true,
     stop: () => undefined,
   };
 
@@ -111,7 +121,7 @@ export function startFakeServer(): FakeServer {
     const claimed = server.owners.has(ws);
     return Response.json({
       workspace: ws,
-      pageId: 'p',
+      pageId: pageKey(b['url']),
       canonicalUrl: b['url'],
       card: card(titleOf(b['url'])),
       proposedSlug: slugOf(titleOf(b['url'])),
@@ -146,14 +156,14 @@ export function startFakeServer(): FakeServer {
     }
     challenges.delete(nonce);
     const ws = wsOf(b['url']);
-    const ownerKey = `owner-key-secret-${counter}-${server.owners.size}`;
+    const ownerKey = `owner-key-secret-${++keysIssued}`;
     server.owners.set(ws, ownerKey);
     return Response.json({
       workspace: ws,
       action: pending.action,
       ownerKey,
       removedLinks: 0,
-      cleanupComplete: true,
+      cleanupComplete: server.verifyCleanupComplete,
     });
   }
 
@@ -210,6 +220,26 @@ export function startFakeServer(): FakeServer {
     });
   }
 
+  function sweep(req: Request, ws: string): Response {
+    if (!server.sweepRoute) return errorResponse('not_found', 'No such route.');
+    if (bearer(req) !== server.owners.get(ws)) return unauthorized();
+    const answer = server.sweepAnswers.shift() ?? { removedLinks: 0, cleanupComplete: true };
+    return Response.json({ workspace: ws, ...answer });
+  }
+
+  function route(req: Request, path: string, b: Body): Response {
+    if (path === '/api/preview') return preview(b);
+    if (path === '/api/challenge') return challenge(b);
+    if (path === '/api/verify') return verify(b);
+    if (path === '/api/links' && req.method === 'POST') return createLink(req, b);
+    const link = /^\/api\/links\/([^/]+)\/([^/]+)$/.exec(path);
+    if (link) return changeLink(req, link[1] ?? '', link[2] ?? '', b);
+    const ns = /^\/api\/ns\/([^/]+)\/(links|sweep)$/.exec(path);
+    if (ns?.[2] === 'links') return listLinks(req, ns[1] ?? '');
+    if (ns?.[2] === 'sweep' && req.method === 'POST') return sweep(req, ns[1] ?? '');
+    return errorResponse('not_found', 'No such route.');
+  }
+
   async function handle(req: Request): Promise<Response> {
     const path = new URL(req.url).pathname;
     const text = await req.text();
@@ -220,16 +250,7 @@ export function startFakeServer(): FakeServer {
       server.failNext = null;
       return errorResponse(forced.code, forced.message, forced.extra, forced.status);
     }
-    const b = (body ?? {}) as Body;
-    if (path === '/api/preview') return preview(b);
-    if (path === '/api/challenge') return challenge(b);
-    if (path === '/api/verify') return verify(b);
-    if (path === '/api/links' && req.method === 'POST') return createLink(req, b);
-    const link = /^\/api\/links\/([^/]+)\/([^/]+)$/.exec(path);
-    if (link) return changeLink(req, link[1] ?? '', link[2] ?? '', b);
-    const ns = /^\/api\/ns\/([^/]+)\/links$/.exec(path);
-    if (ns) return listLinks(req, ns[1] ?? '');
-    return errorResponse('not_found', 'No such route.');
+    return route(req, path, (body ?? {}) as Body);
   }
 
   const listener = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: handle });
