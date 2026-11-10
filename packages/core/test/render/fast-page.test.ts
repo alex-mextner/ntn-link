@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { buildFastPage, findImageBlock } from '../../src/render';
 import type { LinkRecord } from '../../src';
+import { cardImageUrl } from '../../src/card-version';
 import {
   OMAN_ID,
   THSM_ID,
@@ -47,6 +48,14 @@ describe('buildFastPage (recorded Oman page with image blocks)', () => {
     link: link(),
     origin: 'https://x.vercel.app',
     fetchImpl: fake.impl,
+  });
+
+  test('og:image is the same versioned card URL the redirect page announces', async () => {
+    const out = await result;
+    const html = out.status === 200 ? out.html : '';
+    const url = await cardImageUrl('https://x.vercel.app', link());
+    expect(url).toMatch(/^https:\/\/x\.vercel\.app\/img\/thsm\/oman\?v=[0-9a-f]{10}$/);
+    expect(html).toContain(`<meta property="og:image" content="${url}">`);
   });
 
   test('renders every image through our proxy with sniffed dimensions', async () => {

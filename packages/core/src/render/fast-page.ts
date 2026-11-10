@@ -3,6 +3,7 @@
  * image sizes the blocks do not record, render. Kept in core (not in the route file) so the
  * whole path is testable without Next.js and with an injected `fetch`.
  */
+import { cardImageUrl } from '../card-version';
 import type { LinkRecord } from '../records';
 import { emojiOfIcon, renderBlocks } from './blocks';
 import {
@@ -162,7 +163,7 @@ export async function buildFastPage(args: BuildFastPageArgs): Promise<FastPageRe
     lang: link.language ?? 'en',
     canonicalMode: link.canonicalMode,
     notionUrl: link.canonicalUrl,
-    ogImageUrl: `${origin}/img/${link.workspace}/${link.slug}`,
+    ogImageUrl: await cardImageUrl(origin, link),
     editedAt: isoOrUndefined(root?.lastEditedTime),
     createdAt: isoOrUndefined(root?.createdTime),
     body,
