@@ -20,6 +20,7 @@ import type {
   CardData,
 } from './api-types';
 import { API_LIMITS } from './api-types';
+import { TtlCache } from './card-cache';
 import { ApiError } from './errors';
 import { withImageWidth } from './metadata';
 import type { PageFetcher, PageFetchResult } from './notion-fetcher';
@@ -41,6 +42,12 @@ export const CARD_IMAGE_WIDTH = 1200;
 /** Metadata is refreshed lazily when older than this (spec 5.2). */
 export const REFRESH_AFTER_MS = 24 * 60 * 60 * 1000;
 const SLUG_SUFFIX_ATTEMPTS = 30;
+/**
+ * How long a resolved card image is reused per instance before Notion is asked again. Short
+ * because an unpublished page must stop serving its image promptly; never served past it.
+ */
+export const CARD_CACHE_TTL_MS = 60 * 1000;
+const CARD_CACHE_ENTRIES = 500;
 
 export interface ServiceDeps {
   store: Store;
@@ -83,7 +90,10 @@ export interface Service {
   refreshLink(workspace: string, slug: string): Promise<void>;
   /** Re-runs the post-rotation cleanup (removes links whose target is gone); owner only. */
   sweepLinks(workspace: string, ownerKey: string | null): Promise<SweepLinksResponse>;
-  /** What `GET /img/<ws>/<slug>` should serve, resolved fresh (signed URLs expire). */
+  /**
+   * What `GET /img/<ws>/<slug>` should serve. The Notion image is resolved against Notion
+   * (signed URLs expire) and reused per instance for `CARD_CACHE_TTL_MS`.
+   */
   cardSource(workspace: string, slug: string): Promise<CardSource | null>;
   /** The stored link for the fast variant; null when missing or no longer public. */
   getLink(workspace: string, slug: string): Promise<LinkRecord | null>;
@@ -158,7 +168,18 @@ function assertUsableSlug(slug: string): void {
 export function createService(deps: ServiceDeps): Service {
   const repo = new Repository(deps.store);
   const now = deps.now ?? (() => new Date());
-  const purge = deps.purge ?? (async () => {});
+  const purgeEdge = deps.purge ?? (async () => {});
+  // The image URL Notion currently serves for a link; memory only, never stored (it is signed
+  // and expires). Resolved per page id, so a recreated slug never inherits it.
+  const cardImages = new TtlCache<string | null>({
+    ttlMs: CARD_CACHE_TTL_MS,
+    maxEntries: CARD_CACHE_ENTRIES,
+    now: () => now().getTime(),
+  });
+  const purge = async (workspace: string, slug: string): Promise<void> => {
+    cardImages.delete(`${workspace}/${slug}`);
+    await purgeEdge(workspace, slug);
+  };
   const ownership: OwnershipDeps = {
     repo,
     fetcher: deps.fetcher,
@@ -406,14 +427,14 @@ export function createService(deps: ServiceDeps): Service {
       const record = await repo.getLink(workspace, slug);
       if (record === null) return null;
       const card = effectiveCard(record, null);
-      // The stored URL is only a fallback for transient fetch failures: a page that is no
-      // longer public, or moved to another workspace, must not keep serving its image.
-      const fresh = await fetchFresh(record);
-      let imageUrl = record.imageUrl;
-      if (fresh !== null) {
+      const imageUrl = await cardImages.get(`${workspace}/${slug}`, record.pageId, async () => {
+        // The stored URL is only a fallback for transient fetch failures: a page that is no
+        // longer public, or moved to another workspace, must not keep serving its image.
+        const fresh = await fetchFresh(record);
+        if (fresh === null) return { value: record.imageUrl, cacheable: false };
         const stillHere = fresh.kind === 'public' && fresh.workspace === record.workspace;
-        imageUrl = stillHere ? fresh.metadata.imageUrl : null;
-      }
+        return { value: stillHere ? fresh.metadata.imageUrl : null, cacheable: true };
+      });
       if (imageUrl === null || record.goneAt !== null) {
         return { kind: 'generated', title: card.title, description: card.description };
       }

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { API_LIMITS } from '../src/api-types';
 import { ApiError } from '../src/errors';
 import { enforceRateLimit, RATE_LIMITS } from '../src/rate-limit';
+import { createService } from '../src/service';
 import { claim, failureCode, harness, id, pageUrl, type Harness } from './helpers';
 
 let h: Harness;
@@ -269,6 +270,13 @@ describe('redirect page and lifecycle', () => {
   });
 });
 
+const imageAt = (n: number): string =>
+  `https://thsm.notion.site/image/v${n}?table=block&width=2000`;
+const resolved = (n: number): string => imageAt(n).replace('width=2000', 'width=1200');
+const served = async (): Promise<string | null> => {
+  const card = await h.service.cardSource('thsm', 'cached');
+  return card?.kind === 'notion-image' ? card.url : null;
+};
 describe('card source', () => {
   test('uses the freshly resolved Notion image at width 1200, or a generated card without one', async () => {
     h.notion.add(id(6), {
@@ -313,6 +321,113 @@ describe('card source', () => {
     await h.service.createLink({ url: pageUrl('thsm', 6), slug: 'withimage' }, key);
     h.notion.failing.add(id(6));
     expect((await h.service.cardSource('thsm', 'withimage'))?.kind).toBe('notion-image');
+  });
+
+  describe('caching the resolved image', () => {
+    beforeEach(async () => {
+      h.notion.add(id(7), { workspace: 'thsm', title: 'Cached', imageUrl: imageAt(1) });
+      await h.service.createLink({ url: pageUrl('thsm', 7), slug: 'cached' }, key);
+      h.notion.fetches = 0;
+    });
+
+    test('repeated image requests within the fresh window cost one Notion fetch', async () => {
+      await served();
+      await served();
+      await served();
+      expect(h.notion.fetches).toBe(1);
+    });
+
+    test('a burst of simultaneous requests shares one Notion fetch', async () => {
+      await Promise.all(Array.from({ length: 10 }, served));
+      expect(h.notion.fetches).toBe(1);
+    });
+
+    test('an entry is served until its TTL and never after it: the caller waits for Notion', async () => {
+      await served();
+      const page = h.notion.pages.get(id(7));
+      if (page) page.imageUrl = imageAt(2);
+      h.clock.advanceMinutes(0.99);
+      expect(await served()).toBe(resolved(1));
+      expect(h.notion.fetches).toBe(1);
+      h.clock.advanceMinutes(0.01);
+      expect(await served()).toBe(resolved(2));
+      expect(h.notion.fetches).toBe(2);
+    });
+
+    test('a page unpublished or relocated while cached stops serving its image after the TTL', async () => {
+      await served();
+      h.notion.pages.delete(id(7));
+      h.clock.advanceMinutes(5);
+      expect(await served()).toBeNull();
+
+      h.notion.add(id(7), { workspace: 'other', title: 'Cached', imageUrl: imageAt(1) });
+      h.clock.advanceMinutes(5);
+      expect(await served()).toBeNull();
+    });
+
+    test('a transient Notion failure is not remembered', async () => {
+      h.notion.failing.add(id(7));
+      expect(await served()).toBe(resolved(1));
+      h.notion.failing.delete(id(7));
+      const page = h.notion.pages.get(id(7));
+      if (page) page.imageUrl = imageAt(2);
+      expect(await served()).toBe(resolved(2));
+    });
+
+    test('refreshing the link drops the cached image at once', async () => {
+      await served();
+      h.notion.pages.delete(id(7));
+      await h.service.refreshLink('thsm', 'cached');
+      expect(await served()).toBeNull();
+    });
+
+    test('a deleted link that is recreated for another page does not inherit the image', async () => {
+      await served();
+      await h.service.deleteLink('thsm', 'cached', { kind: 'operator' });
+      h.notion.add(id(8), { workspace: 'thsm', title: 'Other', imageUrl: imageAt(9) });
+      await h.service.createLink({ url: pageUrl('thsm', 8), slug: 'cached' }, key);
+      expect(await served()).toBe(resolved(9));
+    });
+
+    test('a slug recreated for another page by another instance does not join the old fetch', async () => {
+      const other = createService({
+        store: h.store,
+        fetcher: h.notion,
+        origin: 'https://ntn.test',
+        now: h.clock.now,
+      });
+      const fetchPage = h.notion.fetchPage.bind(h.notion);
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let held = false;
+      h.notion.fetchPage = async (request) => {
+        if (request.pageId === id(7) && !held) {
+          held = true;
+          started.resolve();
+          await release.promise;
+        }
+        return fetchPage(request);
+      };
+      const pending = served();
+      await started.promise;
+
+      await other.deleteLink('thsm', 'cached', { kind: 'operator' });
+      h.notion.add(id(8), { workspace: 'thsm', title: 'Other', imageUrl: imageAt(9) });
+      await other.createLink({ url: pageUrl('thsm', 8), slug: 'cached' }, key);
+      expect(await served()).toBe(resolved(9));
+
+      release.resolve();
+      await pending;
+      expect(await served()).toBe(resolved(9));
+    });
+
+    test('the resolved image is never written to storage', async () => {
+      const before = await h.store.get('link:thsm/cached');
+      const page = h.notion.pages.get(id(7));
+      if (page) page.imageUrl = imageAt(2);
+      await served();
+      expect(await h.store.get('link:thsm/cached')).toBe(before);
+    });
   });
 });
 
