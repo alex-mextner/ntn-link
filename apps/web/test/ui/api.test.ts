@@ -1,8 +1,9 @@
 /// <reference types="bun" />
 
-import { describe, expect, test } from 'bun:test';
-import { createApi, type FetchLike } from '../../lib/client/api';
-import { ApiCallError } from '../../lib/client/errors';
+import { afterEach, describe, expect, test, vi } from 'bun:test';
+import { createApi, type Api, type FetchLike } from '../../lib/client/api';
+import { REQUEST_TIMEOUT_MS, WRITE_TIMEOUT_MS } from '../../lib/client/deadline';
+import { ApiCallError, describeError } from '../../lib/client/errors';
 
 interface Seen {
   input: string;
@@ -110,5 +111,124 @@ describe('api client', () => {
     expect(result.removedLinks).toBe(2);
     expect(seen[0]!.input).toBe('/api/ns/thsm/sweep');
     expect(seen[0]!.init.method).toBe('POST');
+  });
+});
+
+const never = () => new Promise<Response>(() => {});
+
+const rejectsOnAbort: FetchLike = (_input, init) =>
+  new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () =>
+      reject(new DOMException('aborted', 'AbortError')),
+    );
+  });
+
+/** Lets the deadline pass and returns what the request ended with. */
+async function outcome(pending: Promise<unknown>): Promise<unknown> {
+  const settled = pending.catch((e: unknown) => e);
+  vi.advanceTimersByTime(WRITE_TIMEOUT_MS);
+  return settled;
+}
+
+/** An API whose server never answers, on a fake clock; `signals` are the requests' abort signals. */
+function hung() {
+  vi.useFakeTimers();
+  const signals: AbortSignal[] = [];
+  const fetchLike: FetchLike = (_input, init) => {
+    if (init?.signal) signals.push(init.signal);
+    return never();
+  };
+  return { signals, api: createApi(fetchLike) };
+}
+
+describe('request deadline', () => {
+  afterEach(() => vi.useRealTimers());
+
+  test.each([
+    ['preview', (api: Api) => api.preview('https://x.notion.site/a', null)],
+    ['challenge', (api: Api) => api.challenge('https://x.notion.site/a', 'claim')],
+    ['verify', (api: Api) => api.verify('https://x.notion.site/a', 'n', 't')],
+    ['createLink', (api: Api) => api.createLink({ url: 'https://x.notion.site/a' }, 'K')],
+    ['updateLink', (api: Api) => api.updateLink('thsm', 'a', { fast: false }, 'K')],
+    ['deleteLink', (api: Api) => api.deleteLink('thsm', 'a', 'K')],
+    ['listLinks', (api: Api) => api.listLinks('thsm', 'K')],
+    ['sweep', (api: Api) => api.sweep('thsm', 'K')],
+  ])('%s: a request that never answers ends in a retryable timeout', async (_name, run) => {
+    const { api } = hung();
+    const error = (await outcome(run(api))) as ApiCallError;
+    expect(error).toBeInstanceOf(ApiCallError);
+    expect(error.code).toBe('timeout');
+    expect(describeError(error)).toContain('try again');
+  });
+
+  test('nothing times out before the deadline', async () => {
+    const { api } = hung();
+    let settled = false;
+    void api.listLinks('thsm', 'K').then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    vi.advanceTimersByTime(REQUEST_TIMEOUT_MS - 1);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+  });
+
+  test('the hung request is aborted, not left running', async () => {
+    const { api, signals } = hung();
+    await outcome(api.listLinks('thsm', 'K'));
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
+  test('a body that never finishes streaming also times out', async () => {
+    vi.useFakeTimers();
+    const stuckBody = { ok: true, status: 200, json: never } as unknown as Response;
+    const api = createApi(async () => stuckBody);
+    const error = (await outcome(api.listLinks('thsm', 'K'))) as ApiCallError;
+    expect(error.code).toBe('timeout');
+  });
+
+  test('both outlive the 60 s a route may run, a write by more than a read', async () => {
+    const { api } = hung();
+    const outcomes: string[] = [];
+    const watch = (name: string, pending: Promise<unknown>) =>
+      void pending.then(
+        () => outcomes.push(`${name}:ok`),
+        (error: unknown) => outcomes.push(`${name}:${(error as ApiCallError).code}`),
+      );
+    watch('read', api.listLinks('thsm', 'K'));
+    watch('verify', api.verify('https://x.notion.site/a', 'n', 't'));
+    watch('sweep', api.sweep('thsm', 'K'));
+    vi.advanceTimersByTime(REQUEST_TIMEOUT_MS);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(outcomes).toEqual(['read:timeout']);
+    vi.advanceTimersByTime(WRITE_TIMEOUT_MS - REQUEST_TIMEOUT_MS);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(outcomes.toSorted()).toEqual(['read:timeout', 'sweep:timeout', 'verify:timeout']);
+  });
+
+  test('an abort by the caller stays an AbortError, not a timeout', async () => {
+    const abort = new AbortController();
+    const api = createApi(rejectsOnAbort);
+    const pending = api.preview('https://x.notion.site/a', null, abort.signal);
+    abort.abort();
+    const error = await pending.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DOMException);
+    expect((error as DOMException).name).toBe('AbortError');
+  });
+
+  test('an abort that happened before the call is passed on to the request', async () => {
+    const abort = new AbortController();
+    abort.abort();
+    // Like a real fetch: an already aborted signal rejects at once.
+    const api = createApi((_input, init) =>
+      init?.signal?.aborted ? Promise.reject(new DOMException('aborted', 'AbortError')) : never(),
+    );
+    const error = await api
+      .preview('https://x.notion.site/a', null, abort.signal)
+      .catch((e: unknown) => e);
+    expect((error as DOMException).name).toBe('AbortError');
   });
 });

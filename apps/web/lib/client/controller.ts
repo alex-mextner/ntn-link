@@ -271,6 +271,8 @@ export function createController(
     const { workspace, slug } = result.link;
     const key = keyFor(workspace);
     if (!key) return;
+    if (state().fastSaving) return;
+    store.dispatch({ type: 'link_fast_started' });
     try {
       const { link } = await api.updateLink(workspace, slug, { fast }, key);
       store.dispatch({ type: 'link_fast_changed', workspace, slug, fast: link.fast });
