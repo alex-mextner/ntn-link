@@ -52,8 +52,6 @@ export function renderRedirectHtml(input: RedirectPageInput): string {
     `<meta property="og:title" content="${title}">`,
     ...(description === '' ? [] : [`<meta property="og:description" content="${description}">`]),
     `<meta property="og:image" content="${escapeHtml(input.imageUrl)}">`,
-    `<meta property="og:image:width" content="1200">`,
-    `<meta property="og:image:height" content="630">`,
     ...(locale === null ? [] : [`<meta property="og:locale" content="${locale}">`]),
     `<meta name="twitter:card" content="summary_large_image">`,
     `<meta name="twitter:title" content="${title}">`,

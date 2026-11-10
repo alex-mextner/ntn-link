@@ -34,7 +34,7 @@ core only receives `Caller = { kind: 'operator' }`.)
 | POST   | `/api/ns/<ws>/sweep`       | - (empty body)      | `SweepLinksResponse`  | Bearer key                |
 
 Public routes (not JSON API): `GET /<ws>/<slug>` (HTML with OG tags and an immediate redirect
-to Notion), `GET /<ws>/<slug>/read` (fast static copy), `GET /img/<ws>/<slug>` (1200x630 card:
+to Notion), `GET /<ws>/<slug>/read` (fast static copy), `GET /img/<ws>/<slug>` (card image:
 proxied Notion image or generated title card).
 
 Request bodies are validated by zod schemas exported from core: `previewRequestSchema`,

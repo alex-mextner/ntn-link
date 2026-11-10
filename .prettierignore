@@ -4,4 +4,5 @@ bun.lock
 packages/core/test/fixtures/
 apps/web/assets/
 extension/dist/
+packages/cli/dist/
 .worktrees/
