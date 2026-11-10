@@ -2,7 +2,13 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { unzipSync } from 'fflate';
-import { NOTION_MATCHES, buildManifest, hostPermissionFor } from '../scripts/build';
+import {
+  DEFAULT_ORIGIN,
+  LEGACY_ORIGIN,
+  NOTION_MATCHES,
+  buildManifest,
+  hostPermissionFor,
+} from '../scripts/build';
 
 const root = resolve(import.meta.dir, '..');
 const dist = join(root, 'dist');
@@ -46,9 +52,26 @@ describe('manifests', () => {
     expect(manifest('firefox').permissions).toEqual(['storage', 'clipboardWrite']);
   });
 
-  test('host permissions: only Notion and our origin', () => {
+  test('host permissions: only Notion, our origin and the launch address kept for the migration', () => {
     for (const b of ['chrome', 'firefox'] as const) {
-      expect(manifest(b).host_permissions).toEqual([...NOTION_MATCHES, `${ORIGIN}/*`]);
+      expect(manifest(b).host_permissions).toEqual([
+        ...NOTION_MATCHES,
+        `${ORIGIN}/*`,
+        hostPermissionFor(LEGACY_ORIGIN),
+      ]);
+    }
+  });
+
+  test('the default origin is fastp.ge and the store listing carries its name', () => {
+    expect(DEFAULT_ORIGIN).toBe('https://fastp.ge');
+    const base = JSON.parse(readFileSync(join(root, 'manifest.base.json'), 'utf8')) as {
+      name: string;
+    };
+    expect(base.name).toBe('fastp.ge');
+    for (const b of ['chrome', 'firefox'] as const) {
+      expect(buildManifest(base, b, '1.0.0', DEFAULT_ORIGIN).host_permissions).toContain(
+        'https://fastp.ge/*',
+      );
     }
   });
 

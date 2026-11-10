@@ -13,7 +13,7 @@ async function ensureOffscreen(): Promise<void> {
       url: 'offscreen.html',
       reasons: [chrome.offscreen.Reason.CLIPBOARD],
       justification:
-        'Write the ntn-link to the clipboard after the user pressed the button or shortcut.',
+        'Write the fastp.ge link to the clipboard after the user pressed the button or shortcut.',
     });
   })().finally(() => {
     creating = null;

@@ -160,10 +160,10 @@ Open Graph preview and the page itself is fast; nothing depends on the template.
 ```
 ~version: "2.1"
 
-# Matches https://ntn.link/<workspace>/<slug>/read (and the preview origins while testing).
+# Matches https://fastp.ge/<workspace>/<slug>/read (and the preview origins while testing).
 ?path: /[a-z0-9-]+/[a-z0-9-]+/read
 
-site_name: "ntn.link"
+site_name: "fastp.ge"
 
 body:      //article
 title:     $body//header/h1

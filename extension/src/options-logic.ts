@@ -78,7 +78,7 @@ export async function requestChallenge(
     typeof b.claimToken !== 'string' ||
     typeof b.expiresAt !== 'string'
   ) {
-    return { ok: false, message: 'Unexpected answer from ntn-link.' };
+    return { ok: false, message: 'Unexpected answer from fastp.ge.' };
   }
   return {
     ok: true,
@@ -98,7 +98,7 @@ export async function verifyChallenge(
   if (!res.ok) return { ok: false, message: res.message };
   const b = res.body;
   if (!isRecord(b) || typeof b.workspace !== 'string' || typeof b.ownerKey !== 'string') {
-    return { ok: false, message: 'Unexpected answer from ntn-link.' };
+    return { ok: false, message: 'Unexpected answer from fastp.ge.' };
   }
   await keys.setKey(b.workspace, b.ownerKey);
   return {

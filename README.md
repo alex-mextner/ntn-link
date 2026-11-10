@@ -52,7 +52,7 @@ Bun's isolated install layout in this workspace.
 
 | Variable                                             | Meaning                                                                                                                                                                                                                        |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `PUBLIC_ORIGIN`                                      | Origin used in links and `og:image`, e.g. `https://ntn.link`. Required in production; falls back to `https://$VERCEL_URL`, in development to `http://localhost:$PORT`.                                                         |
+| `PUBLIC_ORIGIN`                                      | Origin used in links and `og:image`, e.g. `https://fastp.ge`. Required in production; falls back to `https://$VERCEL_URL`, in development to `http://localhost:$PORT`.                                                         |
 | `DATABASE_URL`                                       | Storage: the **pooled** Neon Postgres connection string (the Vercel Neon integration injects it). Wins over the Redis variables below.                                                                                         |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Storage (Upstash Redis REST), used when `DATABASE_URL` is not set. `KV_REST_API_URL` / `KV_REST_API_TOKEN` are accepted too.                                                                                                   |
 | `ADMIN_TOKEN`                                        | Operator credential for `DELETE /api/links/<ws>/<slug>` via `X-Admin-Token`. Unset disables operator delete.                                                                                                                   |
@@ -142,7 +142,7 @@ Project settings (`apps/web/vercel.json` carries the framework, install/build co
 
 Environment variables (Production and Preview; see [Environment](#environment)):
 
-- `PUBLIC_ORIGIN`: the public origin, e.g. `https://ntn.link`.
+- `PUBLIC_ORIGIN`: the public origin, e.g. `https://fastp.ge`.
 - `ADMIN_TOKEN`: optional, enables operator delete; mark it sensitive.
 - The store, one of (precedence in this order):
   1. `DATABASE_URL`: the pooled Neon Postgres URL (Neon HTTP driver, one stateless HTTPS request

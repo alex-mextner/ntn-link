@@ -12,7 +12,14 @@ import { zipSync } from 'fflate';
 
 const root = resolve(import.meta.dir, '..');
 const dist = join(root, 'dist');
-export const DEFAULT_ORIGIN = 'https://ntn-link.vercel.app';
+export const DEFAULT_ORIGIN = 'https://fastp.ge';
+
+/**
+ * The address the service launched on. Extensions built for it update in place to this build;
+ * keeping its host permission for the migration means the update does not lose a granted host
+ * (browsers may disable an extension or leave a newly added host ungranted on update).
+ */
+export const LEGACY_ORIGIN = 'https://ntn-link.vercel.app';
 
 export const NOTION_MATCHES = [
   'https://*.notion.site/*',
@@ -79,7 +86,9 @@ export function buildManifest(
   const common = {
     ...base,
     version,
-    host_permissions: [...NOTION_MATCHES, hostPermissionFor(origin)],
+    host_permissions: [
+      ...new Set([...NOTION_MATCHES, hostPermissionFor(origin), hostPermissionFor(LEGACY_ORIGIN)]),
+    ],
     content_scripts: [
       { matches: [...NOTION_MATCHES], js: ['relay.js'], run_at: 'document_start' },
       {
@@ -109,9 +118,10 @@ export function buildManifest(
     browser_specific_settings: {
       // `world: "MAIN"` content scripts need Firefox 128.
       gecko: {
+        // The add-on id is an identity, not a URL: changing it would orphan existing installs.
         id: 'ntn-link@ntn-link.vercel.app',
         strict_min_version: '128.0',
-        // The URL of a page is sent to ntn-link only when the user presses the button or
+        // The URL of a page is sent to fastp.ge only when the user presses the button or
         // shortcut (or switched automatic copying on for that workspace).
         data_collection_permissions: { required: ['browsingActivity'] },
       },

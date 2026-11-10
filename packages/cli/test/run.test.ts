@@ -738,3 +738,21 @@ test("a run that picks up another run's key still waits for the code to leave th
   for (const link of h.server.links.values()) expect(link.card.title).toBe('Our trips');
   expect(h.server.links.size).toBe(2);
 });
+
+test('keys saved for the old vercel.app origin are copied to the default origin once, with one notice', async () => {
+  openKeyStore(h.keysPath).set('https://ntn-link.vercel.app', 'thsm', 'legacy-key');
+  h.ioOverrides = {
+    env: { XDG_CONFIG_HOME: join(h.dir, 'config') },
+    fetch: async () => {
+      throw new Error('offline');
+    },
+  };
+  expect(await h.exec('ls', 'thsm')).toBe(EXIT.network);
+  expect(err()).toContain(
+    'The service now lives at https://fastp.ge: 1 saved owner key(s) for https://ntn-link.vercel.app were copied there.',
+  );
+  expect(openKeyStore(h.keysPath).get('https://fastp.ge', 'thsm')).toBe('legacy-key');
+  clear();
+  await h.exec('ls', 'thsm');
+  expect(err()).not.toContain('The service now lives at');
+});

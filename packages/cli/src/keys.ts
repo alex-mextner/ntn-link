@@ -39,6 +39,12 @@ export interface KeyStore {
    */
   set(origin: string, ws: string, key: string, ifCurrentIs?: string | null): boolean;
   /**
+   * Copies keys saved for `from` to `to` for workspaces that have none there, or an older one (the
+   * old entries stay; both names serve one deployment, so the newest key wins). Returns how many
+   * were copied; 0 once nothing is left to move.
+   */
+  adopt(from: string, to: string): number;
+  /**
    * Runs a verification flow while holding the cross-process lock of one origin+workspace; a
    * second flow for the same workspace waits (calling `onWait` once) until the first one is done.
    */
@@ -170,6 +176,13 @@ export function openKeyStore(path: string, options: KeyStoreOptions = {}): KeySt
     return {};
   }
 
+  /** Must run under the lock. 'wx' (O_EXCL) never follows a pre-planted link and a random name is not guessable. */
+  function writeEntries(entries: Entries): void {
+    const tmp = join(dir, `keys.json.tmp-${randomBytes(8).toString('hex')}`);
+    writeFileSync(tmp, `${JSON.stringify(entries, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+    renameSync(tmp, path);
+  }
+
   return {
     warnings,
     get(origin, ws) {
@@ -192,12 +205,36 @@ export function openKeyStore(path: string, options: KeyStoreOptions = {}): KeySt
         const current = entries[origin]?.[ws]?.key ?? null;
         if (ifCurrentIs !== undefined && current !== ifCurrentIs) return false;
         entries[origin] = { ...entries[origin], [ws]: { key, savedAt: new Date().toISOString() } };
-        // 'wx' (O_EXCL) never follows a pre-planted link and a random name is not guessable.
-        const tmp = join(dir, `keys.json.tmp-${randomBytes(8).toString('hex')}`);
-        writeFileSync(tmp, `${JSON.stringify(entries, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-        renameSync(tmp, path);
+        writeEntries(entries);
         return true;
       });
+    },
+    adopt(from, to) {
+      const stale = (entries: Entries): Array<[string, Entry]> =>
+        Object.entries(entries[from] ?? {}).filter(([ws, entry]) => {
+          const have = entries[to]?.[ws];
+          return have === undefined || (entry.savedAt > have.savedAt && entry.key !== have.key);
+        });
+      try {
+        // Nothing to move is the usual case: answer it without a lock or any write.
+        const first = read();
+        if (first === CORRUPT || stale(first).length === 0) return 0;
+        securePrivateDir(dir);
+        return withLock(lockPath, lockWaitMs, fileLock, () => {
+          const entries = recover();
+          const moving = stale(entries);
+          if (moving.length === 0) return 0;
+          const adopted = { ...entries[to] };
+          for (const [ws, entry] of moving) adopted[ws] = { ...entry };
+          writeEntries({ ...entries, [to]: adopted });
+          return moving.length;
+        });
+      } catch (error) {
+        warnings.push(
+          `cannot move saved keys to ${to}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return 0;
+      }
     },
     withFlow(origin, ws, action, onWait) {
       securePrivateDir(dir);

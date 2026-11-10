@@ -119,7 +119,7 @@ describe('parseArgs', () => {
     expect(parseArgs([URL_ARG], { NTN_LINK_ORIGIN: 'https://env.example/' }).origin).toBe(
       'https://env.example',
     );
-    expect(parseArgs([URL_ARG], {}).origin).toBe('https://ntn-link.vercel.app');
+    expect(parseArgs([URL_ARG], {}).origin).toBe('https://fastp.ge');
   });
 
   test('refuses to send the owner key over plain http to a remote host', () => {

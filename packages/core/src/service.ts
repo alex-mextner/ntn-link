@@ -61,7 +61,7 @@ const REDIRECT_ICON_TIMEOUT_MS = 1500;
 export interface ServiceDeps {
   store: Store;
   fetcher: PageFetcher;
-  /** `https://ntn.link`, no trailing slash. */
+  /** `https://fastp.ge`, no trailing slash. */
   origin: string;
   now?: () => Date;
   /** Purge edge caches for both link forms of `<ws>/<slug>`. */

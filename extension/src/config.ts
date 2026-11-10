@@ -3,11 +3,11 @@
  */
 
 /**
- * The ntn-link origin. One constant on purpose: it is rewritten at build time from
- * `NTN_LINK_ORIGIN` (also used for the manifest host permission), so changing the domain
- * after it is bought is a rebuild, not a code change.
+ * The fastp.ge origin. One constant on purpose: it is rewritten at build time from
+ * `NTN_LINK_ORIGIN` (also used for the manifest host permission), so pointing at
+ * another service is a rebuild, not a code change.
  */
-export const ORIGIN: string = process.env.NTN_LINK_ORIGIN ?? 'https://ntn-link.vercel.app';
+export const ORIGIN: string = process.env.NTN_LINK_ORIGIN ?? 'https://fastp.ge';
 
 /**
  * How long the automatic path may wait for the whole chain before Notion's own text wins.

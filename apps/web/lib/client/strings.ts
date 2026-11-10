@@ -2,7 +2,7 @@ import type { ErrorCode } from '../../../../packages/core/src/api-types';
 
 /** Every user-facing string of the web UI. The service language is English. */
 export const en = {
-  appName: 'ntn.link',
+  appName: 'fastp.ge',
   headlineLead: 'Short links for Notion pages that',
   headlineAccent: 'unfurl beautifully.',
   tagline:

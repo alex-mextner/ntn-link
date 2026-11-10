@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "ntn-link",
-  "description": "Pretty, fast share links for public Notion pages. Copy a short ntn-link with one shortcut.",
+  "name": "fastp.ge",
+  "description": "Pretty, fast share links for public Notion pages. Copy a short fastp.ge link with one shortcut.",
   "options_ui": { "page": "options.html", "open_in_tab": true },
   "action": {
-    "default_title": "Copy pretty ntn-link",
+    "default_title": "Copy pretty fastp.ge link",
     "default_icon": { "16": "icons/16.png", "32": "icons/32.png" }
   },
   "icons": {

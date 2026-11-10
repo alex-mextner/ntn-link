@@ -26,7 +26,7 @@ ntn-link set <workspace>/<slug> [--title T] [--description D] [--slug S]
 | `--slug name`    | Choose the slug (`a-z`, `0-9`, `-`, up to 64). Default: derived from the title.                                                                             |
 | `--fast`         | Print the fast static copy's `/read` link instead of the redirect link (the fast page itself is created by default; turn it off with `set ... --fast off`). |
 | `--copy`         | Copy the printed link with `pbcopy`, `wl-copy`, `xclip` or `xsel` if present; otherwise warns.                                                              |
-| `--origin URL`   | Service origin. Default: `$NTN_LINK_ORIGIN`, else the built-in default.                                                                                     |
+| `--origin URL`   | Service origin. Default: `$NTN_LINK_ORIGIN`, else `https://fastp.ge`.                                                                                       |
 | `set --title ""` | An empty `--title` or `--description` removes that override.                                                                                                |
 
 **stdout carries only the result**: the link for the create command, tab-separated
@@ -70,7 +70,7 @@ command once interactively.
 Owner keys live in `$XDG_CONFIG_HOME/ntn-link/keys.json` (default
 `~/.config/ntn-link/keys.json`), file mode `0600` in a `0700` directory, saved per
 service origin and workspace: a key issued by one service is never sent to another one
-(for example when you pass a different `--origin`). Parallel runs are safe: the file is
+(for example when you pass a different `--origin`). The service moved from `https://ntn-link.vercel.app` to `https://fastp.ge` (the same deployment): the first run against the default origin copies the keys saved for the old address to the new one and says so once; the old entries stay. Parallel runs are safe: the file is
 updated under a lock, and two runs that both need the ownership check for the same workspace
 take turns (the second one waits, then uses the key the first one saved instead of rotating it
 again). A lock records the pid and time of its holder; one left behind by a killed run is

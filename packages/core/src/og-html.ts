@@ -31,7 +31,7 @@ function scriptString(text: string): string {
 }
 
 /**
- * Inline chrome for the two stub pages: one centred message in the ntn.link look (ink
+ * Inline chrome for the two stub pages: one centred message in the fastp.ge look (ink
  * background with a violet glow, the logo above it), light or dark by `prefers-color-scheme`.
  * No `url()`, no web fonts and no script, so the stub can never trigger a request of its own.
  */
