@@ -25,6 +25,7 @@ import {
   CHALLENGE_TTL_SECONDS,
   type ChallengeRecord,
   type LinkRecord,
+  type LinkSnapshot,
   type NamespaceRecord,
   type NamespaceSnapshot,
   type Repository,
@@ -36,13 +37,24 @@ export interface OwnershipDeps {
   now: () => Date;
   /** Called for every link removed during rotation so caches can be purged. */
   onLinkRemoved: (workspace: string, slug: string) => Promise<void>;
+  sweepBudget: SweepBudget;
 }
 
 type PublicPage = Extract<PageFetchResult, { kind: 'public' }>;
 
 const NONCE_PATTERN = /^ntn-verify-[a-z0-9]{10}$/;
 export const OWNER_KEY_PREFIX = 'ntnk_';
-const ROTATION_RECHECK_CONCURRENCY = 10;
+/** Bounds one sweep call so it fits a serverless function limit (see `sweepGoneLinks`). */
+export interface SweepBudget {
+  timeMs: number;
+  maxFetches: number;
+  concurrency: number;
+}
+export const DEFAULT_SWEEP_BUDGET: SweepBudget = {
+  timeMs: 20_000,
+  maxFetches: 100,
+  concurrency: 8,
+};
 
 export function isNonce(value: string): boolean {
   return NONCE_PATTERN.test(value);
@@ -265,7 +277,7 @@ async function rotateOwnerKey(
   }
   if (!replaced) throw overtaken();
 
-  const sweep = await sweepGoneLinks(deps, workspace);
+  const sweep = await sweepGoneLinks(deps, workspace, keyHash);
   // Another rotation may have completed while this one was sweeping.
   const confirmed = await stillHolds(deps.repo, workspace, next);
   if (confirmed === null) throw new UnconfirmedRotationError();
@@ -417,38 +429,114 @@ async function purgeAfterRotation(
  * keep the link; deleting on a blip would be worse than a stale link. Best-effort and
  * idempotent: a storage failure stops the sweep and reports it incomplete, never throws, so
  * the rotation that triggered it is not undone. Deleted links are never restored.
+ *
+ * One call is bounded (`deps.sweepBudget`): at most `maxFetches` Notion fetches, at most
+ * `concurrency` in flight, and the call returns by `timeMs` whatever Notion, storage or the
+ * cache purge are doing (work still in flight is abandoned and no new step starts). A link
+ * whose target was confirmed public is stamped with `version` (the key hash the sweep belongs
+ * to) and is not fetched again by later calls; a link whose fetch failed has its failure count
+ * raised and is queued behind links with fewer failures, so failing links cannot starve the rest. `complete` is false
+ * while links were left unexamined.
  */
-export async function sweepGoneLinks(deps: OwnershipDeps, workspace: string): Promise<SweepResult> {
+export async function sweepGoneLinks(
+  deps: OwnershipDeps,
+  workspace: string,
+  version: string,
+): Promise<SweepResult> {
+  const { timeMs, maxFetches, concurrency } = deps.sweepBudget;
   let removed = 0;
-  try {
-    const snapshots = await deps.repo.listLinkSnapshots(workspace);
-    for (let i = 0; i < snapshots.length; i += ROTATION_RECHECK_CONCURRENCY) {
-      const batch = snapshots.slice(i, i + ROTATION_RECHECK_CONCURRENCY);
-      const gone = await Promise.all(
-        batch.map(async (s) => ((await targetIsGone(deps, s.link)) ? s : null)),
+  let complete = true;
+  let timedOut = false;
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      resolve('timeout');
+    }, timeMs);
+  });
+
+  const stamp = (snapshot: LinkSnapshot, change: Partial<LinkRecord>) =>
+    deps.repo.updateLink(workspace, snapshot.link.slug, (latest) =>
+      latest.pageId === snapshot.link.pageId ? { ...latest, ...change } : latest,
+    );
+  const triesOf = (link: LinkRecord): number =>
+    link.sweepTried?.version === version ? link.sweepTried.count : 0;
+
+  const work = async (): Promise<void> => {
+    try {
+      const pending = (await deps.repo.listLinkSnapshots(workspace)).filter(
+        (s) => s.link.sweptVersion !== version,
       );
-      for (const snapshot of gone) {
-        if (snapshot === null) continue;
-        // Version-checked: a link recreated under the same slug meanwhile is not ours to remove.
-        if (!(await deps.repo.deleteLinkSnapshot(snapshot))) continue;
-        removed++;
-        await purgeAfterRotation(deps, workspace, snapshot.link.slug);
+      // Links whose fetch failed fewer times go first (stable), so a persistent failure cannot
+      // occupy the budget forever while links behind it never get a turn.
+      const ordered = pending.toSorted((a, b) => triesOf(a.link) - triesOf(b.link));
+      if (ordered.length > maxFetches) complete = false;
+      const queue = ordered.slice(0, maxFetches);
+      // Results are applied one at a time, as each fetch settles: whatever finished before the
+      // deadline is kept even when a sibling is still slow.
+      let applied: Promise<void> = Promise.resolve();
+      let failed = false;
+      const apply = async (snapshot: LinkSnapshot, verdict: Verdict): Promise<void> => {
+        if (timedOut || failed) return;
+        try {
+          if (verdict === 'gone') {
+            // Version-checked: a link recreated under the same slug meanwhile is not ours to remove.
+            if (!(await deps.repo.deleteLinkSnapshot(snapshot))) {
+              // Changed under us (recreated, or bookkeeping by a concurrent sweep): the next
+              // call looks at it again.
+              complete = false;
+              return;
+            }
+            removed++;
+            await purgeAfterRotation(deps, workspace, snapshot.link.slug);
+          } else if (verdict === 'public') {
+            await stamp(snapshot, { sweptVersion: version });
+          } else if (verdict === 'unknown') {
+            await stamp(snapshot, {
+              sweepTried: { version, count: triesOf(snapshot.link) + 1 },
+            });
+          }
+        } catch {
+          failed = true;
+          complete = false;
+        }
+      };
+      for (let i = 0; i < queue.length; i += concurrency) {
+        if (timedOut || failed) break;
+        await Promise.all(
+          queue.slice(i, i + concurrency).map(async (snapshot) => {
+            const verdict = await Promise.race([targetVerdict(deps, snapshot.link), expired]);
+            if (verdict === 'timeout') complete = false;
+            applied = applied.then(() => apply(snapshot, verdict));
+            await applied;
+          }),
+        );
       }
+      if (timedOut) complete = false;
+    } catch {
+      complete = false;
     }
-  } catch {
-    return { removedLinks: removed, complete: false };
+  };
+
+  try {
+    await Promise.race([work(), expired]);
+  } finally {
+    clearTimeout(timer);
   }
-  return { removedLinks: removed, complete: true };
+  // Work abandoned at the deadline may still be running; it stops before its next step.
+  return { removedLinks: removed, complete: complete && !timedOut };
 }
 
-async function targetIsGone(deps: OwnershipDeps, link: LinkRecord): Promise<boolean> {
+type Verdict = 'gone' | 'public' | 'unknown' | 'timeout';
+
+async function targetVerdict(deps: OwnershipDeps, link: LinkRecord): Promise<Verdict> {
   try {
     const result = await deps.fetcher.fetchPage({
       pageId: link.pageId,
       workspaceHint: link.workspace,
     });
-    return result.kind !== 'public' || result.workspace !== link.workspace;
+    return result.kind === 'public' && result.workspace === link.workspace ? 'public' : 'gone';
   } catch {
-    return false; // Transient Notion trouble: keep the link.
+    return 'unknown'; // Transient Notion trouble: keep the link.
   }
 }

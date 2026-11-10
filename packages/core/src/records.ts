@@ -5,6 +5,7 @@
  */
 import { z } from 'zod';
 import { API_LIMITS } from './api-types';
+import { randomToken } from './crypto';
 import { ApiError } from './errors';
 import type { Store } from './store';
 
@@ -48,6 +49,13 @@ export const linkRecordSchema = z.object({
   canonicalMode: z.enum(['self', 'notion']),
   /** Set when a refresh found the page no longer public; cleared when it is public again. */
   goneAt: z.string().nullable(),
+  /**
+   * keyHash of the namespace version whose post-rotation sweep last confirmed this link's
+   * target is still public here; lets repeated, time-bounded sweeps converge. Absent until swept.
+   */
+  sweptVersion: z.string().nullable().optional(),
+  /** Failed sweep fetches of this link for `version`; links with fewer failures are retried first. */
+  sweepTried: z.object({ version: z.string(), count: z.number() }).nullable().optional(),
 });
 export type LinkRecord = z.infer<typeof linkRecordSchema>;
 
@@ -80,6 +88,9 @@ export interface LinkSnapshot {
 }
 
 const linkKey = (ws: string, slug: string): string => `link:${ws}/${slug}`;
+const pageCreationKey = (ws: string, pageId: string): string => `pagelock:${ws}/${pageId}`;
+/** Longer than any function invocation can live (Vercel maxDuration 60 s), so a live holder never loses its lease. */
+const PAGE_CREATION_LOCK_SECONDS = 120;
 const linkIndexKey = (ws: string): string => `nslinks:${ws}`;
 
 export type MoveLinkResult =
@@ -215,6 +226,26 @@ export class Repository {
       slug,
       snapshot.raw,
     );
+  }
+  /**
+   * Lease serialising the automatic (no explicit slug) creation of a link for one page, so a
+   * retry overlapping its original request cannot create a second link. Resolves the holder's
+   * token, or null when somebody else holds it. The lease outlives any function invocation, so
+   * it only expires on its own when the holder died.
+   */
+  async acquirePageCreation(ws: string, pageId: string): Promise<string | null> {
+    const token = randomToken();
+    const acquired = await this.store.set(pageCreationKey(ws, pageId), token, {
+      ifAbsent: true,
+      ttlSeconds: PAGE_CREATION_LOCK_SECONDS,
+    });
+    return acquired ? token : null;
+  }
+  /** Releases only the holder's own lease: a successor's lease is never deleted. */
+  async releasePageCreation(ws: string, pageId: string, token: string): Promise<void> {
+    const key = pageCreationKey(ws, pageId);
+    // `deleteIndexed` is the store's atomic delete-if-equal; the index set is a throwaway no-op.
+    await this.store.deleteIndexed(key, `${key}:holders`, 'lease', token);
   }
   async listLinks(ws: string): Promise<LinkRecord[]> {
     return (await this.listLinkSnapshots(ws)).map((snapshot) => snapshot.link);

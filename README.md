@@ -56,22 +56,23 @@ Errors are always `{"error":{"code","message"}}` with the status from `ERROR_STA
 owner key travels as `Authorization: Bearer <ownerKey>`; client IPs (for rate limits, stored only
 as a hash inside expiring counters) come from `X-Forwarded-For` where that header is trustworthy (see `NTN_TRUST_PROXY`).
 
-| Endpoint                                                 | Purpose                                                                     |
-| -------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `POST /api/preview` `{url}`                              | Card data, proposed slug, whether verification is needed                    |
-| `POST /api/challenge` `{url, action: "claim"\|"rotate"}` | `nonce` (public) and `claimToken` (private)                                 |
-| `POST /api/verify` `{url, nonce, claimToken}`            | After the nonce is in a public page title: issues the owner key, shown once |
-| `POST /api/links` `{url, slug?, fast?, overrides?}`      | Create a link (Bearer key), `201`                                           |
-| `PATCH /api/links/<ws>/<slug>`                           | Change slug, overrides, `fast`, `canonicalMode` (Bearer key)                |
-| `DELETE /api/links/<ws>/<slug>`                          | Delete (Bearer key or `X-Admin-Token`)                                      |
-| `GET /api/ns/<ws>/links`                                 | List the namespace's links (Bearer key)                                     |
+| Endpoint                                                 | Purpose                                                                                                      |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `POST /api/preview` `{url}`                              | Card data, proposed slug, whether verification is needed                                                     |
+| `POST /api/challenge` `{url, action: "claim"\|"rotate"}` | `nonce` (public) and `claimToken` (private)                                                                  |
+| `POST /api/verify` `{url, nonce, claimToken}`            | After the nonce is in a public page title: issues the owner key, shown once                                  |
+| `POST /api/links` `{url, slug?, fast?, overrides?}`      | Create a link (Bearer key), `201`; a retry for the same page without `slug` returns the existing link, `200` |
+| `PATCH /api/links/<ws>/<slug>`                           | Change slug, overrides, `fast`, `canonicalMode` (Bearer key)                                                 |
+| `DELETE /api/links/<ws>/<slug>`                          | Delete (Bearer key or `X-Admin-Token`)                                                                       |
+| `GET /api/ns/<ws>/links`                                 | List the namespace's links (Bearer key)                                                                      |
+| `POST /api/ns/<ws>/sweep`                                | Remove links whose Notion page is gone; time-bounded, repeat until `cleanupComplete: true` (Bearer key)      |
 
 Public routes:
 
 | Route                   | Response                                                                                                                                                                                                                                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /<ws>/<slug>`      | `200` HTML with OG tags and refresh to Notion (`410` once the Notion page is no longer public, `404` unknown). `Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=86400`, tagged `ntn-<ws>-<slug>` via `Vercel-Cache-Tag`; stale cards are refreshed in the background after 24 h |
-| `GET /<ws>/<slug>/read` | Fast copy of the page; `501 not_implemented` until that variant is merged                                                                                                                                                                                                                               |
+| `GET /<ws>/<slug>/read` | Fast copy of the page (static HTML)                                                                                                                                                                                                                                                                     |
 | `GET /img/<ws>/<slug>`  | 1200x630 image: the page's Notion social image fetched fresh from Notion at request time (signed URLs expire, so only the bytes are CDN-cached), otherwise a generated title card (bundled Noto Sans, Cyrillic supported)                                                                               |
 
 Link changes purge the CDN by cache tag on Vercel (`dangerouslyDeleteByTag`) and revalidate the

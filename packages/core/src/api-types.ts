@@ -8,7 +8,8 @@
  *
  * Conventions
  * - All bodies are JSON. Success responses are the documented `*Response` type with
- *   HTTP 200 (201 for `POST /api/links`).
+ *   HTTP 200 (`POST /api/links` answers 201 when it creates a link, 200 when it returns the
+ *   page's existing link).
  * - Errors are always `{ error: { code, message } }` with the HTTP status from
  *   `ERROR_STATUS`. `message` is human-readable and meant to be printed as is.
  * - The owner key travels as `Authorization: Bearer <ownerKey>`, never in a body or URL.
@@ -196,6 +197,12 @@ export interface LinkView {
   fastUrl: string | null;
 }
 
+/**
+ * Without an explicit `slug`, creating a link for a page that already has one in the namespace
+ * is idempotent: the existing link is returned (HTTP 200, `overrides`/`fast` of the request are
+ * ignored; use PATCH). An explicit `slug` always creates a new link (201), so one page can carry
+ * several links.
+ */
 export interface CreateLinkResponse {
   link: LinkView;
 }
@@ -230,7 +237,10 @@ export interface SweepLinksResponse {
   workspace: string;
   /** Links removed by this call (not counting earlier sweeps). */
   removedLinks: number;
-  /** False when this sweep also stopped early (storage trouble); call it again. */
+  /**
+   * False when this call stopped early (time/fetch budget spent or storage trouble); call it
+   * again until it reports true. Each call examines a bounded number of links.
+   */
   cleanupComplete: boolean;
 }
 

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { API_LIMITS } from '../src/api-types';
 import { ApiError } from '../src/errors';
 import { enforceRateLimit, RATE_LIMITS } from '../src/rate-limit';
+import { Repository } from '../src/records';
 import { createService } from '../src/service';
 import { claim, failureCode, harness, id, pageUrl, type Harness } from './helpers';
 
@@ -50,6 +51,70 @@ describe('creating links', () => {
     expect(first.link.fastUrl).toBe('https://ntn.test/thsm/nashi-s-lenochkoy-puteshestviya/read');
     const second = await h.service.createLink({ url: pageUrl('thsm', 2) }, key);
     expect(second.link.slug).toBe('nashi-s-lenochkoy-puteshestviya-2');
+  });
+
+  test('a retry without a slug returns the existing link instead of creating slug-2', async () => {
+    const first = await h.service.createLink({ url: pageUrl('thsm', 1) }, key);
+    expect(first.created).toBe(true);
+    // The client timed out and retries the identical request.
+    const retry = await h.service.createLink({ url: pageUrl('thsm', 1), fast: false }, key);
+    expect(retry.created).toBe(false);
+    expect(retry.link).toEqual(first.link);
+    expect((await h.service.listLinks('thsm', key)).links).toHaveLength(1);
+  });
+
+  test('overlapping requests for one page create a single link', async () => {
+    const results = await Promise.all([
+      h.service.createLink({ url: pageUrl('thsm', 1) }, key),
+      h.service.createLink({ url: pageUrl('thsm', 1) }, key),
+      h.service.createLink({ url: pageUrl('thsm', 1) }, key),
+    ]);
+    expect(results.filter((r) => r.created)).toHaveLength(1);
+    expect(new Set(results.map((r) => r.link.slug)).size).toBe(1);
+    expect((await h.service.listLinks('thsm', key)).links).toHaveLength(1);
+  });
+
+  test('a stalled holder whose lease expired does not delete the successor lease', async () => {
+    const repo = new Repository(h.store);
+    const first = await repo.acquirePageCreation('thsm', id(1));
+    expect(first).not.toBeNull();
+    expect(await repo.acquirePageCreation('thsm', id(1))).toBeNull();
+    // The lease expires and a second holder takes over; the first holder's release is a no-op.
+    await h.store.delete('pagelock:thsm/' + id(1));
+    const second = await repo.acquirePageCreation('thsm', id(1));
+    expect(second).not.toBeNull();
+    await repo.releasePageCreation('thsm', id(1), first ?? '');
+    expect(await repo.acquirePageCreation('thsm', id(1))).toBeNull();
+    await repo.releasePageCreation('thsm', id(1), second ?? '');
+    expect(await repo.acquirePageCreation('thsm', id(1))).not.toBeNull();
+  });
+
+  test('a retry revives a link whose page was unpublished and published again', async () => {
+    const first = await h.service.createLink({ url: pageUrl('thsm', 2) }, key);
+    const page = h.notion.pages.get(id(2));
+    if (!page) throw new Error('page missing');
+    h.notion.pages.delete(id(2));
+    await h.service.refreshLink('thsm', first.link.slug);
+    expect((await h.service.redirectPage('thsm', first.link.slug)).kind).toBe('gone');
+
+    h.notion.add(id(2), page);
+    const retry = await h.service.createLink({ url: pageUrl('thsm', 2) }, key);
+    expect(retry).toMatchObject({ created: false, link: { slug: first.link.slug } });
+    expect((await h.service.redirectPage('thsm', first.link.slug)).kind).toBe('page');
+  });
+
+  test('an explicit different slug still creates a second link for the same page', async () => {
+    const first = await h.service.createLink({ url: pageUrl('thsm', 1) }, key);
+    const second = await h.service.createLink({ url: pageUrl('thsm', 1), slug: 'extra' }, key);
+    expect(second.created).toBe(true);
+    expect(second.link.slug).toBe('extra');
+    // Without a slug the oldest link of the page answers.
+    const retry = await h.service.createLink({ url: pageUrl('thsm', 1) }, key);
+    expect(retry).toMatchObject({ created: false, link: { slug: first.link.slug } });
+    // The idempotent path is still owner-only.
+    expect(await failureCode(h.service.createLink({ url: pageUrl('thsm', 1) }, 'ntnk_x'))).toBe(
+      'needs_verification',
+    );
   });
 
   test('explicit slugs: taken, reserved and malformed are typed errors, nothing is rewritten', async () => {
