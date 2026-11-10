@@ -18,9 +18,10 @@ import type { LinkRecord } from './records';
  * drawn on it, or which images count as a usable cover. Bumping changes the image URL of
  * every link, so shared links pick up the new look the next time a crawler reads their page.
  */
-export const CARD_RENDER_VERSION = 3;
+export const CARD_RENDER_VERSION = 4;
 // 2: the generated card draws the page icon (and records now digest text and icon together).
 // 3: the footer mark of the generated card is the fastp.ge logo instead of the link glyph.
+// 4: the footer shows only the logo, no wordmark text (the ntn.link text is gone).
 
 /** What the card is built from, as far as the stored record knows it. */
 function cardImageKey(imageUrl: string | null): string {

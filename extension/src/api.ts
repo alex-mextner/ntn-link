@@ -37,7 +37,7 @@ export async function callApi(call: ApiCall): Promise<ApiResult> {
       ...(call.signal ? { signal: call.signal } : {}),
     });
   } catch {
-    return { ok: false, status: 0, code: null, message: 'Could not reach ntn-link.' };
+    return { ok: false, status: 0, code: null, message: 'Could not reach fastp.ge.' };
   }
   let json: unknown = null;
   try {
@@ -50,7 +50,7 @@ export async function callApi(call: ApiCall): Promise<ApiResult> {
   const message =
     isRecord(error) && typeof error.message === 'string'
       ? error.message
-      : `ntn-link answered HTTP ${res.status}.`;
+      : `fastp.ge answered HTTP ${res.status}.`;
   const code = isRecord(error) && typeof error.code === 'string' ? error.code : null;
   return { ok: false, status: res.status, code, message };
 }

@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import './globals.css';
 
 export const metadata = {
-  title: 'ntn.link: short links for public Notion pages',
+  title: 'fastp.ge: short links for public Notion pages',
   description:
     'Short, readable links for public Notion pages that unfurl in messengers with the real title, description and image.',
 };

@@ -134,7 +134,7 @@ key are not fetched again, so repeated calls converge (links whose fetch failed 
 ```ts
 interface ServiceDeps {
   store: Store; fetcher: PageFetcher;
-  origin: string;                        // 'https://ntn.link', no trailing slash
+  origin: string;                        // 'https://fastp.ge', no trailing slash
   now?: () => Date;
   purge?: (workspace: string, slug: string) => Promise<void>;  // purge edge caches for both link forms
 }

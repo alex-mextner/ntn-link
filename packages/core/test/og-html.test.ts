@@ -5,8 +5,8 @@ const hostile = `</title><script>alert("x")</script> & 'q' "d" \u2028`;
 const base = {
   title: 'Наши Путешествия',
   description: 'Лето 2026',
-  imageUrl: 'https://ntn.link/img/thsm/our-trips',
-  pageUrl: 'https://ntn.link/thsm/our-trips',
+  imageUrl: 'https://fastp.ge/img/thsm/our-trips',
+  pageUrl: 'https://fastp.ge/thsm/our-trips',
   targetUrl: 'https://thsm.notion.site/413d447ac4b180169985c93eea7f02f9',
   language: 'ru',
   emoji: null,
@@ -18,9 +18,9 @@ describe('renderRedirectHtml', () => {
     expect(out).toContain('<meta property="og:title" content="Наши Путешествия">');
     expect(out).toContain('<meta property="og:description" content="Лето 2026">');
     expect(out).toContain(
-      '<meta property="og:image" content="https://ntn.link/img/thsm/our-trips">',
+      '<meta property="og:image" content="https://fastp.ge/img/thsm/our-trips">',
     );
-    expect(out).toContain('<meta property="og:url" content="https://ntn.link/thsm/our-trips">');
+    expect(out).toContain('<meta property="og:url" content="https://fastp.ge/thsm/our-trips">');
     expect(out).toContain('<meta property="og:locale" content="ru_RU">');
     expect(out).toContain('<meta name="twitter:card" content="summary_large_image">');
     expect(out).not.toContain('og:image:width');

@@ -409,3 +409,66 @@ test('reading never follows a planted link: no chmod of its target, no key read 
   expect(statSync(victim).mode & 0o777).toBe(0o755);
   expect(store.warnings.join(' ')).toContain('cannot read key file');
 });
+
+test('adopt copies keys saved for the old origin once and keeps the old entries', () => {
+  const store = openKeyStore(path);
+  store.set('https://old.test', 'thsm', 'k-old');
+  store.set('https://old.test', 'other', 'k-other');
+  store.set('https://new.test', 'other', 'k-new');
+  expect(store.adopt('https://old.test', 'https://new.test')).toBe(1);
+  expect(store.get('https://new.test', 'thsm')).toBe('k-old');
+  expect(store.get('https://new.test', 'other')).toBe('k-new');
+  expect(store.get('https://old.test', 'thsm')).toBe('k-old');
+  expect(store.adopt('https://old.test', 'https://new.test')).toBe(0);
+  expect(
+    openKeyStore(join(dir, 'missing.json')).adopt('https://old.test', 'https://new.test'),
+  ).toBe(0);
+});
+
+const entry = (key: string, savedAt: string) => ({ key, savedAt });
+
+test('adopt takes a newer key from the old origin over a stale copy, and never an older one', () => {
+  mkdirSync(cfg, { recursive: true });
+  writeFileSync(
+    path,
+    JSON.stringify({
+      'https://old.test': {
+        fresh: entry('old-fresh', '2026-11-12T00:00:00.000Z'),
+        stale: entry('old-stale', '2026-11-01T00:00:00.000Z'),
+      },
+      'https://new.test': {
+        fresh: entry('new-fresh', '2026-11-05T00:00:00.000Z'),
+        stale: entry('new-stale', '2026-11-05T00:00:00.000Z'),
+      },
+    }),
+    { mode: 0o600 },
+  );
+  const store = openKeyStore(path);
+  expect(store.adopt('https://old.test', 'https://new.test')).toBe(1);
+  expect(store.get('https://new.test', 'fresh')).toBe('old-fresh');
+  expect(store.get('https://new.test', 'stale')).toBe('new-stale');
+});
+
+test('adopt with nothing to move takes no lock and survives a read-only key directory', () => {
+  const store = openKeyStore(path);
+  store.set('https://new.test', 'thsm', 'k');
+  chmodSync(cfg, 0o500);
+  try {
+    expect(store.adopt('https://old.test', 'https://new.test')).toBe(0);
+    expect(store.warnings).toEqual([]);
+  } finally {
+    chmodSync(cfg, 0o700);
+  }
+});
+
+test('adopt that cannot write reports a warning instead of throwing', () => {
+  const store = openKeyStore(path);
+  store.set('https://old.test', 'thsm', 'k');
+  chmodSync(cfg, 0o500);
+  try {
+    expect(store.adopt('https://old.test', 'https://new.test')).toBe(0);
+    expect(store.warnings.join('\n')).toContain('cannot move saved keys to https://new.test');
+  } finally {
+    chmodSync(cfg, 0o700);
+  }
+});

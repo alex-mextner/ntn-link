@@ -129,7 +129,7 @@ async function previewPage(page: ClassifiedPage, api: Ctx['api']): Promise<Resol
     typeof b.pageId !== 'string' ||
     typeof b.canonicalUrl !== 'string'
   ) {
-    return stop('api_error', 'Unexpected answer from ntn-link.');
+    return stop('api_error', 'Unexpected answer from fastp.ge.');
   }
   return {
     workspace: b.workspace,
@@ -149,7 +149,7 @@ async function findLink(ctx: Ctx, pageId: string): Promise<LinkSummary | null> {
   const links = isRecord(list.body) && Array.isArray(list.body.links) ? list.body.links : null;
   const views = links?.map(parseLinkView);
   if (views === undefined || views.includes(null)) {
-    return stop('api_error', 'Unexpected answer from ntn-link.', ctx.workspace);
+    return stop('api_error', 'Unexpected answer from fastp.ge.', ctx.workspace);
   }
   return views.find((v) => v?.pageId.replaceAll('-', '').toLowerCase() === pageId) ?? null;
 }
@@ -163,7 +163,7 @@ async function mutate(
   const res = await callApi({ ...ctx.api, ownerKey: ctx.ownerKey, path, method, body });
   if (!res.ok) return stop('api_error', res.message, ctx.workspace);
   const view = isRecord(res.body) ? parseLinkView(res.body.link) : null;
-  return view ?? stop('api_error', 'Unexpected answer from ntn-link.', ctx.workspace);
+  return view ?? stop('api_error', 'Unexpected answer from fastp.ge.', ctx.workspace);
 }
 
 async function resolveInner(args: ResolveArgs, signal: AbortSignal): Promise<ResolveResult> {
@@ -231,7 +231,7 @@ async function createOrFind(c: Creation): Promise<ResolveResult> {
   );
   const link = pick(found, kind);
   return link === null
-    ? fail('api_error', 'ntn-link returned no link.', workspace)
+    ? fail('api_error', 'fastp.ge returned no link.', workspace)
     : { ok: true, link };
 }
 
@@ -239,12 +239,12 @@ export const resolveLink: ResolveLink = async (args) => {
   try {
     const out = await withTimeout(args.timeoutMs, (signal) => resolveInner(args, signal));
     if (out === TIMED_OUT) {
-      return { ok: false, reason: 'timeout', message: 'ntn-link took too long to answer.' };
+      return { ok: false, reason: 'timeout', message: 'fastp.ge took too long to answer.' };
     }
     return out;
   } catch (error) {
     if (error instanceof Stop) return error.result;
     // Storage failures and other surprises must not escape into the copy path.
-    return fail('api_error', 'Something went wrong while contacting ntn-link.');
+    return fail('api_error', 'Something went wrong while contacting fastp.ge.');
   }
 };

@@ -216,10 +216,6 @@ export async function renderTitleCard(
       </div>
       <div style={{ display: 'flex', alignItems: 'center', height: FOOTER_ROW }}>
         <Logo />
-        <div style={{ display: 'flex', marginLeft: 10, fontSize: 28, color: '#f3f3f8' }}>
-          ntn
-          <span style={{ color: '#8fc0ff' }}>.link</span>
-        </div>
       </div>
     </div>,
     { width: 1200, height: 630, fonts: await loadFonts(), headers },

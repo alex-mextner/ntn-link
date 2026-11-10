@@ -1,5 +1,5 @@
 /*
- * ntn.link design system. Dark first, with a light theme behind prefers-color-scheme.
+ * fastp.ge design system. Dark first, with a light theme behind prefers-color-scheme.
  * System font stack only (no web fonts, no CDN). Motion is gated at the bottom of the file.
  */
 
@@ -225,20 +225,6 @@ p {
 
 .wordmark:hover .wordmark-logo {
   transform: rotate(-6deg) scale(1.05);
-}
-
-.wordmark-text {
-  font-size: 1.25rem;
-  font-weight: 750;
-  letter-spacing: -0.03em;
-}
-
-.wordmark-dot {
-  background: var(--grad-text);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  font-weight: 600;
 }
 
 .hero {
@@ -1569,8 +1555,7 @@ textarea.input {
     border: 1px solid ButtonText;
   }
 
-  .grad,
-  .wordmark-dot {
+  .grad {
     color: CanvasText;
     background: none;
   }

@@ -33,10 +33,10 @@ async function notify(state: NotifyState, text: string): Promise<void> {
   const badge = BADGE[state];
   await chrome.action.setBadgeBackgroundColor({ color: badge.color });
   await chrome.action.setBadgeText({ text: badge.text });
-  await chrome.action.setTitle({ title: `ntn-link: ${text}` });
+  await chrome.action.setTitle({ title: `fastp.ge: ${text}` });
   setTimeout(() => {
     void chrome.action.setBadgeText({ text: '' });
-    void chrome.action.setTitle({ title: 'Copy pretty ntn-link' });
+    void chrome.action.setTitle({ title: 'Copy pretty fastp.ge link' });
   }, 3000);
 }
 

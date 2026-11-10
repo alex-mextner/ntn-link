@@ -35,6 +35,17 @@ const config: NextConfig = {
         { key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=604800' },
       ],
     })),
+  // The start page belongs to fastp.ge; the old host keeps answering everything else (link pages with
+  // their previews, /read, /img and the API) so shared links keep unfurling and installed CLIs and
+  // extensions keep working.
+  redirects: async () => [
+    {
+      source: '/',
+      has: [{ type: 'host', value: 'ntn-link.vercel.app' }],
+      destination: 'https://fastp.ge/',
+      permanent: true,
+    },
+  ],
   agentRules: false,
 };
 

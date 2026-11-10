@@ -23,8 +23,8 @@ NTN_LINK_ORIGIN=https://example.com bun run build:extension
 
 Writes `extension/dist/chrome/`, `extension/dist/firefox/` and
 `ntn-link-chrome-<version>.zip` / `ntn-link-firefox-<version>.zip`. The origin
-(default `https://ntn-link.vercel.app`) is baked into the scripts and into the manifest
-host permission from the same variable. Load `dist/chrome` as an unpacked extension, or
+(default `https://fastp.ge`) is baked into the scripts and into the manifest
+host permission from the same variable (the launch address `https://ntn-link.vercel.app` stays a host permission for one migration release, so updating an old install keeps working). Load `dist/chrome` as an unpacked extension, or
 `dist/firefox/manifest.json` as a temporary add-on.
 
 Permissions: `storage`; `offscreen` and `clipboardWrite` on Chrome (the offscreen

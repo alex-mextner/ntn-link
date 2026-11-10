@@ -7,6 +7,7 @@ import pkg from '../package.json';
 import { ApiFailure, NetworkFailure, createApi } from './api';
 import { type Command, UsageError, parseArgs } from './args';
 import { create, list, remove, sweep, update } from './commands';
+import { DEFAULT_ORIGIN, LEGACY_ORIGIN } from './config';
 import { type Ctx, type Io, say } from './ctx';
 import { EXIT, Fail, exitCodeFor, plainText } from './errors';
 import { openKeyStore } from './keys';
@@ -16,7 +17,7 @@ import { ConfigError, keysFilePath } from './paths';
 
 export type { Io } from './ctx';
 
-const USAGE = `ntn-link ${pkg.version} - short links for public Notion pages
+const USAGE = `ntn-link ${pkg.version} - short fastp.ge links for public Notion pages
 
 Usage:
   ntn-link <notion-url> [--slug name] [--fast] [--copy] [--origin URL]
@@ -63,10 +64,25 @@ async function dispatch(ctx: Ctx, command: Command): Promise<void> {
   else if (command.kind === 'set') await update(ctx, command);
 }
 
+/**
+ * The service moved from LEGACY_ORIGIN to DEFAULT_ORIGIN (the same deployment): keys are saved per
+ * origin, so the ones saved for the old address are copied over once, with one notice.
+ */
+function adoptLegacyKeys(ctx: Ctx): void {
+  if (ctx.origin !== DEFAULT_ORIGIN) return;
+  const moved = ctx.keys.adopt(LEGACY_ORIGIN, DEFAULT_ORIGIN);
+  if (moved === 0) return;
+  say(
+    ctx,
+    `The service now lives at ${DEFAULT_ORIGIN}: ${moved} saved owner key(s) for ${LEGACY_ORIGIN} were copied there. Old links keep working.`,
+  );
+}
+
 async function execute(io: Io, command: Command, origin: string, log: RunLog): Promise<number> {
   try {
     const keys = openKeyStore(keysFilePath(io.env, io.home));
     const ctx: Ctx = { io, origin, log, api: createApi(origin, io.fetch, log, pkg.version), keys };
+    adoptLegacyKeys(ctx);
     await dispatch(ctx, command);
     for (const warning of keys.warnings) say(ctx, `Warning: ${warning}`);
     return EXIT.ok;

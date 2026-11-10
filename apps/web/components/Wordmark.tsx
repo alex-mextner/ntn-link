@@ -1,9 +1,9 @@
 import { LOGO_PATH, LOGO_STROKE, LOGO_VIEWBOX } from '@ntn-link/core/brand';
 
-/** The product identity: the logo (one path, `currentColor`, so it follows the theme), then the name set in two weights. */
+/** The product identity: the logo alone (one path, `currentColor`, so it follows the theme); the name is only its accessible label. */
 export function Wordmark() {
   return (
-    <a className="wordmark" href="/" aria-label="ntn.link home">
+    <a className="wordmark" href="/" aria-label="fastp.ge home" title="fastp.ge">
       <svg
         className="wordmark-logo"
         viewBox={LOGO_VIEWBOX}
@@ -17,9 +17,6 @@ export function Wordmark() {
       >
         <path fillRule="evenodd" d={LOGO_PATH} />
       </svg>
-      <span className="wordmark-text" aria-hidden="true">
-        ntn<span className="wordmark-dot">.link</span>
-      </span>
     </a>
   );
 }
