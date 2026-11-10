@@ -1,12 +1,16 @@
 /**
- * PostgresStore on the REAL Neon database behind DATABASE_URL, through the production
- * executor (opt-in: `DATABASE_URL=... bun run test:neon`, skipped otherwise). Every key of the
- * run carries a unique `ntnlinktest:<random>:` prefix and is removed again afterwards, so it is
- * safe against a database that serves real data. Time travel only touches this run's rows.
+ * PostgresStore on a REAL Neon database through the production executor. Opt-in and guarded
+ * (see `support/live-db-guard.ts`): it never reads `DATABASE_URL`, and runs only with
+ *
+ *   NTN_TEST_DATABASE_URL=<a separate Neon branch> NTN_ALLOW_LIVE_DB_TESTS=1 bun run test:neon
+ *
+ * and is skipped otherwise. Every key of the run carries a unique `ntnlinktest:<random>:`
+ * prefix and is removed again in `afterAll`, which also runs after failures. Time travel only
+ * touches this run's rows.
  */
 import { describe, expect, setDefaultTimeout, test } from 'bun:test';
-import { databaseUrlFromEnv } from '../src/postgres-store';
 import { neonHttpExecutor } from '../src/sql-executor';
+import { liveDbTarget } from './support/live-db-guard';
 import { sqlHarness } from './support/sql-harness';
 import { defineStoreContract } from './store-contract';
 
@@ -20,13 +24,13 @@ const BURST_WIDTH = 20;
 /** The bounded burst of 220 calls takes longer than bun's 5 s default per test. */
 setDefaultTimeout(60_000);
 
-const url = databaseUrlFromEnv(process.env);
-const executor = url ? neonHttpExecutor(url) : null;
+const target = liveDbTarget(process.env);
+const executor = target.kind === 'run' ? neonHttpExecutor(target.url) : null;
 
 defineStoreContract(
   'PostgresStore on Neon',
   () => {
-    if (!executor) throw new Error('unreachable: the suite is skipped without DATABASE_URL');
+    if (!executor) throw new Error('unreachable: the suite is skipped without a live target');
     return sqlHarness(executor, BURST_WIDTH);
   },
   { skip: executor === null },

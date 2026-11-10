@@ -30,8 +30,20 @@ bun run build        # next build --webpack
 bun run smoke:notion # opt-in live check of Notion's page shape (network)
 bun run test:redis    # opt-in: store contract on a real Redis (docker)
 bun run test:postgres # opt-in: store contract on a real Postgres (docker), true concurrency
-DATABASE_URL=... bun run test:neon  # opt-in: store contract on the real Neon database (unique key prefix, cleaned up)
+NTN_TEST_DATABASE_URL=... NTN_ALLOW_LIVE_DB_TESTS=1 bun run test:neon  # opt-in: store contract on a separate Neon branch, never DATABASE_URL (see below)
 ```
+
+`test:neon` writes to a real database, so it is guarded (`packages/core/test/support/live-db-guard.ts`):
+it ignores `DATABASE_URL` completely, runs only against `NTN_TEST_DATABASE_URL` (use a separate Neon
+branch, never the production one), and only with `NTN_ALLOW_LIVE_DB_TESTS=1`. It refuses a URL whose
+host equals the host of `DATABASE_URL`, `POSTGRES_URL*` or `PGHOST*` in the same environment, and any
+run with `NODE_ENV` or `VERCEL_ENV` set to `production`. The guard cannot recognise the production
+database when no app variable is set next to the test URL: do not point the test URL at it. Rows
+of a run (`ntnlinktest:<random>:`) are removed in `afterAll`, which also runs after failures (both
+deletes run at once, each retried with a pause; a failure names the prefix to clean by hand).
+Plain `bun test` loads the same file: keep `NTN_TEST_DATABASE_URL` out of `.env` files, since with
+the URL but without the opt-in the suite fails to load (on purpose), and with both it writes to
+that database.
 
 Next is run with `--webpack` because Turbopack 16.4 cannot resolve `react/jsx-runtime` through
 Bun's isolated install layout in this workspace.
