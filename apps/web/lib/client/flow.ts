@@ -56,6 +56,14 @@ export interface FlowState {
   phase: Phase;
   url: string;
   preview: PreviewResponse | null;
+  /**
+   * The browser holds an owner key for `preview.workspace` other than the one the preview request
+   * carried (none was sent because the URL gave no workspace hint, one for a different
+   * workspace, or the stored key changed while the request was in flight). It is a snapshot from
+   * the moment the preview loaded: `preview.needsVerification` ignores such a key, so Create may
+   * still go through without any proof, and the stepper then does not send the person to Verify.
+   */
+  keyUntested: boolean;
   slug: string;
   slugTouched: boolean;
   title: string;
@@ -80,6 +88,7 @@ export const initialState: FlowState = {
   phase: 'idle',
   url: '',
   preview: null,
+  keyUntested: false,
   slug: '',
   slugTouched: false,
   title: '',
@@ -98,7 +107,7 @@ export const initialState: FlowState = {
 export type Action =
   | { type: 'url_changed'; url: string }
   | { type: 'preview_started' }
-  | { type: 'preview_loaded'; preview: PreviewResponse }
+  | { type: 'preview_loaded'; preview: PreviewResponse; keyUntested: boolean }
   | { type: 'preview_failed'; error: FlowError }
   | { type: 'slug_changed'; slug: string }
   | { type: 'title_changed'; title: string }
@@ -131,6 +140,7 @@ const handlers: Handlers = {
     ...state,
     phase: 'previewing',
     preview: null,
+    keyUntested: false,
     error: null,
     verification: null,
     result: null,
@@ -143,6 +153,7 @@ const handlers: Handlers = {
           ...state,
           phase: 'ready',
           preview: action.preview,
+          keyUntested: action.keyUntested,
           slug: state.slugTouched ? state.slug : action.preview.proposedSlug,
           verifyAction: action.preview.suggestedAction ?? 'claim',
           error: null,
@@ -356,12 +367,17 @@ export interface Step {
  * workspace needs no proof (already owned, or just verified).
  */
 export function flowSteps(state: FlowState): Step[] {
-  const { phase, preview } = state;
+  const { phase, preview, keyUntested } = state;
   const verified = preview !== null && !preview.needsVerification;
+  // A preview that still needs proof keeps Verify lit through a Create attempt too, so the
+  // highlight does not hop to Create and back when Create turns into verification.
+  const proofPending =
+    isVerificationPhase(phase) ||
+    ((phase === 'ready' || phase === 'creating') && !verified && !keyUntested);
   const current: StepId =
     phase === 'idle' || phase === 'previewing'
       ? 'preview'
-      : isVerificationPhase(phase)
+      : proofPending
         ? 'verify'
         : phase === 'created'
           ? 'share'

@@ -11,6 +11,10 @@ function at(phase: Phase, overrides: Partial<FlowState> = {}): string {
     .join(' ');
 }
 
+const highlighted = (state: FlowState) =>
+  flowSteps(state)
+    .filter((s) => s.status === 'current' || s.status === 'busy')
+    .map((s) => s.id);
 const unverified = previewFixture();
 const verified = previewFixture({ needsVerification: false, suggestedAction: null });
 
@@ -23,9 +27,24 @@ describe('flowSteps', () => {
     expect(at('previewing')).toBe('preview:busy verify:upcoming create:upcoming share:upcoming');
   });
 
-  test('a ready preview of an unverified workspace still lists verification ahead', () => {
+  test('a ready preview of an unverified workspace is waiting on verification, not on create', () => {
     expect(at('ready', { preview: unverified })).toBe(
+      'preview:done verify:current create:upcoming share:upcoming',
+    );
+  });
+
+  test('a stored key the preview did not carry keeps Create current: nothing proves it is bad yet', () => {
+    expect(at('ready', { preview: unverified, keyUntested: true })).toBe(
       'preview:done verify:upcoming create:current share:upcoming',
+    );
+  });
+
+  test('pressing Create on an unverified preview does not move the highlight to Create and back', () => {
+    expect(at('creating', { preview: unverified })).toBe(
+      'preview:done verify:busy create:upcoming share:upcoming',
+    );
+    expect(at('creating', { preview: unverified, keyUntested: true })).toBe(
+      'preview:done verify:upcoming create:busy share:upcoming',
     );
   });
 
@@ -79,5 +98,27 @@ describe('flowSteps', () => {
       const steps = flowSteps({ ...initialState, phase, preview: unverified });
       expect(steps.filter((s) => s.status === 'current' || s.status === 'busy')).toHaveLength(1);
     }
+  });
+
+  test('the create step is highlighted only once nothing is left to prove', () => {
+    // Step 3 must not light up in every state: only for a workspace that needs no proof.
+    for (const phase of [
+      'idle',
+      'previewing',
+      'needs_verification',
+      'requesting_challenge',
+      'awaiting_proof',
+      'verifying',
+    ] satisfies Phase[]) {
+      expect(highlighted({ ...initialState, phase, preview: unverified })).not.toContain('create');
+    }
+    expect(highlighted({ ...initialState, phase: 'ready', preview: unverified })).toEqual([
+      'verify',
+    ]);
+    expect(highlighted({ ...initialState, phase: 'ready', preview: verified })).toEqual(['create']);
+    expect(highlighted({ ...initialState, phase: 'creating', preview: verified })).toEqual([
+      'create',
+    ]);
+    expect(highlighted({ ...initialState, phase: 'created', preview: verified })).toEqual([]);
   });
 });
