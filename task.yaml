@@ -1,0 +1,7 @@
+version: 1
+backend: github-issues
+github:
+  repo: alex-mextner/ntn-link
+  attachment_mode: native
+routing:
+  write_backend: github-issues
