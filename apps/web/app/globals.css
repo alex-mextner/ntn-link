@@ -216,15 +216,17 @@ p {
   border-radius: 12px;
 }
 
-.wordmark-logo {
+.wordmark-lockup {
   flex: none;
-  width: 2.75rem;
+  display: block;
   height: 2.75rem;
+  width: auto;
+  aspect-ratio: 4996 / 1354;
   transition: transform var(--dur) var(--ease);
 }
 
-.wordmark:hover .wordmark-logo {
-  transform: rotate(-6deg) scale(1.05);
+.wordmark:hover .wordmark-lockup {
+  transform: scale(1.03);
 }
 
 .hero {

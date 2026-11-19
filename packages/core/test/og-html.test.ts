@@ -67,16 +67,16 @@ describe('redirect page icon', () => {
 
   test('an emoji icon replaces the logo mark and becomes the tab icon', () => {
     expect(iconed).toContain('<span class="m e" aria-hidden="true">🤿</span>');
-    expect(iconed).not.toContain('<svg width="48"');
+    expect(iconed).not.toContain('<span class="m l"');
     const favicon = /<link rel="icon" href="data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)">/.exec(
       iconed,
     )?.[1];
     expect(Buffer.from(favicon ?? '', 'base64').toString('utf8')).toContain('>🤿</text>');
   });
 
-  test('no icon keeps the logo mark and the logo as the tab icon', () => {
+  test('no icon keeps the lockup mark and the logo as the tab icon', () => {
     const plain = renderRedirectHtml(base);
-    expect(plain).toContain('<svg width="48"');
+    expect(plain).toContain('<span class="m l"');
     expect(plain).toContain(FAVICON_LINK);
   });
 

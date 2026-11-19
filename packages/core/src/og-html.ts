@@ -5,7 +5,14 @@
  * descriptions are attacker-controlled. The redirect target is passed in by the caller
  * and is always the canonical URL the server rebuilt, never user input.
  */
-import { FAVICON_SVG, LOGO_PATH, LOGO_STROKE, LOGO_VIEWBOX } from './brand';
+import { FAVICON_SVG } from './brand';
+import {
+  LOCKUP_ASPECT,
+  LOCKUP_LOGO_PATH,
+  LOCKUP_STROKE,
+  LOCKUP_VIEWBOX,
+  LOCKUP_WORD_PATH,
+} from './lockup';
 import { ogLocale } from './metadata';
 
 const HTML_ESCAPES: ReadonlyMap<string, string> = new Map([
@@ -42,14 +49,15 @@ const STUB_CSS = [
   'body{margin:0;min-height:100vh;display:grid;place-items:center;padding:1.5rem;background:radial-gradient(40rem 26rem at 10% -10%,rgba(124,92,255,.28),transparent 62%),radial-gradient(34rem 24rem at 100% 0,rgba(56,189,248,.16),transparent 58%),var(--bg);color:var(--fg);font:1rem/1.55 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Helvetica Neue",Arial,sans-serif;text-align:center}',
   'main{max-width:28rem}',
   '.m{display:grid;place-items:center;width:3rem;height:3rem;margin:0 auto 1.25rem;color:var(--fg)}',
+  '.m.l{width:auto}',
   '.m.e{width:auto;height:auto;font-size:3.5rem;line-height:1;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}',
   'h1{margin:0 0 .5rem;font-size:1.625rem;line-height:1.2;letter-spacing:-.025em}',
   'p{margin:.5rem 0;color:var(--mut)}',
   'a{color:var(--ac);font-weight:600;text-underline-offset:.2em}',
 ].join('');
 
-/** The fastp.ge logo, drawn inline so the stub stays one self-contained document. */
-const MARK = `<span class="m" aria-hidden="true"><svg width="48" height="48" viewBox="${LOGO_VIEWBOX}" fill="currentColor" stroke="currentColor" stroke-width="${LOGO_STROKE}" stroke-linejoin="round"><path fill-rule="evenodd" d="${LOGO_PATH}"/></svg></span>`;
+/** The fastp.ge lockup (logo and "Fast Page"), drawn inline so the stub stays one self-contained document. */
+const MARK = `<span class="m l" aria-hidden="true"><svg width="${Math.round(48 * LOCKUP_ASPECT)}" height="48" viewBox="${LOCKUP_VIEWBOX}"><path fill="currentColor" fill-rule="evenodd" d="${LOCKUP_LOGO_PATH}"/><path fill="none" stroke="currentColor" stroke-width="${LOCKUP_STROKE}" stroke-linecap="round" stroke-linejoin="round" d="${LOCKUP_WORD_PATH}"/></svg></span>`;
 
 /**
  * The logo as a tab icon in a data URI (base64, so the markup carries no foreign URL): stub and

@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./brand": "./src/brand.ts",
+    "./lockup": "./src/lockup.ts",
     "./render": "./src/render/index.ts"
   },
   "scripts": {
