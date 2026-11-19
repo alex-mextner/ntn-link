@@ -1,21 +1,32 @@
-import { LOGO_PATH, LOGO_STROKE, LOGO_VIEWBOX } from '@ntn-link/core/brand';
+import {
+  LOCKUP_LOGO_PATH,
+  LOCKUP_STROKE,
+  LOCKUP_VIEWBOX,
+  LOCKUP_WORD_PATH,
+} from '@ntn-link/core/lockup';
 
-/** The product identity: the logo alone (one path, `currentColor`, so it follows the theme); the name is only its accessible label. */
+/**
+ * The product identity: the logo and the hand-lettered "Fast Page" as one drawing (`currentColor`,
+ * so it follows the theme). The accessible name is on the link, the drawing itself is decorative.
+ */
 export function Wordmark() {
   return (
-    <a className="wordmark" href="/" aria-label="fastp.ge home" title="fastp.ge">
+    <a className="wordmark" href="/" aria-label="Fast Page, fastp.ge home" title="Fast Page">
       <svg
-        className="wordmark-logo"
-        viewBox={LOGO_VIEWBOX}
-        fill="currentColor"
-        // The hand-drawn line is a hairline at 44 px: a little stroke keeps it crisp.
-        stroke="currentColor"
-        strokeWidth={LOGO_STROKE}
-        strokeLinejoin="round"
+        className="wordmark-lockup"
+        viewBox={LOCKUP_VIEWBOX}
         aria-hidden="true"
         focusable="false"
       >
-        <path fillRule="evenodd" d={LOGO_PATH} />
+        <path fill="currentColor" fillRule="evenodd" d={LOCKUP_LOGO_PATH} />
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={LOCKUP_STROKE}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d={LOCKUP_WORD_PATH}
+        />
       </svg>
     </a>
   );

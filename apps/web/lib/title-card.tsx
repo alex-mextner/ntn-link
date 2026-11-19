@@ -8,7 +8,13 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CardIcon } from '@ntn-link/core';
-import { LOGO_PATH, LOGO_STROKE, LOGO_VIEWBOX } from '@ntn-link/core/brand';
+import {
+  LOCKUP_ASPECT,
+  LOCKUP_LOGO_PATH,
+  LOCKUP_STROKE,
+  LOCKUP_VIEWBOX,
+  LOCKUP_WORD_PATH,
+} from '@ntn-link/core/lockup';
 import { ImageResponse } from 'next/og';
 import { emojiDataUri } from './emoji-picture';
 import {
@@ -52,22 +58,25 @@ function loadFonts(): Promise<Font[]> {
   return fonts;
 }
 
-/** The logo in the footer: the same path as the web header, light on the dark card. */
+/** The lockup in the footer: the same drawing as the web header, light on the dark card. */
 function Logo() {
   return (
     <svg
-      width={FOOTER_LOGO_SIZE}
+      width={Math.round(FOOTER_LOGO_SIZE * LOCKUP_ASPECT)}
       height={FOOTER_LOGO_SIZE}
-      viewBox={LOGO_VIEWBOX}
-      fill="#f3f3f8"
-      // A hairline of the hand-drawn line would blur at this size: thicken it a little.
-      stroke="#f3f3f8"
-      strokeWidth={LOGO_STROKE}
-      strokeLinejoin="round"
+      viewBox={LOCKUP_VIEWBOX}
       // Taller than the 40 px row: negative margins keep the row's height, so nothing above moves.
       style={{ margin: `${(FOOTER_ROW - FOOTER_LOGO_SIZE) / 2}px 0` }}
     >
-      <path fillRule="evenodd" d={LOGO_PATH} />
+      <path fill="#f3f3f8" fillRule="evenodd" d={LOCKUP_LOGO_PATH} />
+      <path
+        fill="none"
+        stroke="#f3f3f8"
+        strokeWidth={LOCKUP_STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d={LOCKUP_WORD_PATH}
+      />
     </svg>
   );
 }
